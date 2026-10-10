@@ -1,0 +1,18 @@
+# Databricks Apps spec for OpenDesign.
+# See docs/databricks-native/README.md for the deployment model.
+#
+# pnpm workspaces need an explicit command. The daemon serves both /api/* and
+# the static web export (apps/web/out), so it is the only process.
+# Databricks injects PORT / DATABRICKS_APP_PORT; the daemon reads them and
+# binds 0.0.0.0 when they are set.
+command: ["node", "apps/daemon/dist/cli.js", "--no-open"]
+
+env:
+  # Wave 1 only: the Databricks Apps proxy authenticates every request before
+  # it reaches the container, which is the daemon's existing "trusted reverse
+  # proxy" mode. Wave 2 replaces this with per-request OBO auth
+  # (X-Forwarded-Access-Token).
+  - name: OD_DISABLE_API_AUTH
+    value: "1"
+  - name: NODE_ENV
+    value: "production"
