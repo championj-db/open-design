@@ -93,35 +93,11 @@ describe('message center client', () => {
     expect(readArchivedIds(adapter).size).toBe(0);
   });
 
-  it('follows pagination until the server cursor is exhausted', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(Response.json({ messages: [{ id: 'new' }], nextCursor: 'next', unreadCount: 1 }))
-      .mockResolvedValueOnce(Response.json({ messages: [{ id: 'old' }], nextCursor: null, unreadCount: 1 })));
-    const result = await pullMessageCenter({ locale: 'en', loggedIn: false });
-    expect(result.map((message) => message.id)).toEqual(['new', 'old']);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
-    const firstUrl = String(vi.mocked(fetch).mock.calls[0]?.[0]);
-    expect(firstUrl).toContain('/api/integrations/vela/message-center-public/messages?');
-    expect(firstUrl).not.toContain('startedAt=');
-  });
-
-  it('fails fast when pagination cursors stop advancing', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(Response.json({ messages: [{ id: 'new' }], nextCursor: 'stuck', unreadCount: 1 }))
-      .mockResolvedValueOnce(Response.json({ messages: [{ id: 'old' }], nextCursor: 'stuck', unreadCount: 1 })));
-    await expect(
-      pullMessageCenter({ locale: 'en', loggedIn: false }),
-    ).rejects.toThrow('Message Center pagination cursor did not advance');
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
-  });
-
-  it('uses the credential-scoped daemon route for logged-in pulls', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      Response.json({ messages: [], nextCursor: null, unreadCount: 0 }),
-    ));
-    await pullMessageCenter({ locale: 'en', loggedIn: true });
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
-      '/api/integrations/vela/message-center/messages?',
-    );
+  it('pulls an empty inbox without calling the removed Vela message-center routes', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(pullMessageCenter({ locale: 'en', loggedIn: false })).resolves.toEqual([]);
+    await expect(pullMessageCenter({ locale: 'en', loggedIn: true })).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

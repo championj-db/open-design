@@ -51,7 +51,8 @@ export const DEFAULT_MAX_AGENT_TURNS = 50;
 export const DATABRICKS_AGENT_SYSTEM_PROMPT = [
   'You are the OpenDesign agent, running inside the OpenDesign daemon on Databricks.',
   'You work in the current project directory and can call tools to inspect and change it:',
-  'Read, Write, Edit, LS (files, paths relative to the project directory) and Bash (shell commands in the project directory).',
+  'Read, Write, Edit, LS (files, paths relative to the project directory; nothing outside it is reachable).',
+  'Bash (shell commands) only works when the Databricks sandbox is enabled; until then it is refused, so do not rely on it.',
   'Prefer writing deliverables to files with Write/Edit rather than pasting large files into the reply.',
   'When the task is finished, reply with a short summary and do not call any more tools.',
 ].join('\n');
@@ -168,6 +169,14 @@ export async function runDatabricksAgent(options: DatabricksAgentRunOptions): Pr
       }
 
       const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
+      if (ordered.length === 0 && !text && finishReason === null) {
+        // An HTTP 200 that carried no content, no tool call and no finish is a
+        // broken/truncated response, not an empty final answer.
+        throw new DatabricksServingError(
+          'DATABRICKS_SERVING_STREAM',
+          `Model Serving endpoint "${options.endpoint}" returned no content, tool calls, or finish reason`,
+        );
+      }
       if (ordered.length === 0) {
         stopReason = finishReason === 'length' ? 'max_tokens' : 'end_turn';
         emitUsage();

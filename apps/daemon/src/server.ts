@@ -15566,9 +15566,9 @@ export async function startServer({
         prompt: composed,
         cwd: effectiveCwd,
         model: safeModel,
-        readableRoots: extraAllowedDirs,
+        // No readableRoots / agent env: tools stay inside the project cwd and
+        // never run local commands (see agent-protocol/databricks/executor.ts).
         env: process.env,
-        executorEnv: spawnedAgentEnv ?? undefined,
         userToken: runUserToken(run),
         emit: sendAgentEvent,
         onCredentialSource: (source) => {

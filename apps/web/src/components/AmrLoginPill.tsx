@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
+  AMR_ACCOUNT_UI_ENABLED,
   cancelVelaLogin,
   fetchVelaLoginStatus,
   startVelaLogin,
@@ -277,10 +278,16 @@ export function AmrAccountControl({
   );
 }
 
-// AMR-specific login pill that lives as a sibling inside the installed
-// agent card. The pill polls `/api/integrations/vela/status` after a Sign-in
-// click until the daemon reports loggedIn=true.
-export function AmrLoginPill({
+// AMR-specific login pill. Hidden while `AMR_ACCOUNT_UI_ENABLED` is off: the
+// AMR account (and its daemon routes) does not exist on Databricks, so no
+// sign-in / sign-out control may render.
+export function AmrLoginPill(props: AmrLoginPillProps) {
+  return AMR_ACCOUNT_UI_ENABLED ? <AmrLoginPillControl {...props} /> : null;
+}
+
+// The pill polls the AMR status after a Sign-in click until it reports
+// loggedIn=true.
+function AmrLoginPillControl({
   className,
   hideSignedOutStatus = false,
   hideSignedInStatus = false,

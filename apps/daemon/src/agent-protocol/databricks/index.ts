@@ -7,8 +7,8 @@ import { databricksHostOrigin } from '../../auth/databricks-obo.js';
 import {
   DatabricksServingError,
   createDatabricksServingClient,
-  defaultServingEndpoint,
   resolveServingCredential,
+  resolveServingEndpoint,
   servicePrincipalFromEnv,
   type FetchLike,
   type ServingCredentialSource,
@@ -21,7 +21,7 @@ import { BUILTIN_AGENT_TOOLS } from './tools.js';
 export { createInProcessAgentChild, type InProcessAgentChild } from './in-process-child.js';
 export { runDatabricksAgent, DATABRICKS_AGENT_SYSTEM_PROMPT } from './harness.js';
 export { createLocalExecutor, createRunExecutor, type AgentExecutor } from './executor.js';
-export { BUILTIN_AGENT_TOOLS } from './tools.js';
+export { BUILTIN_AGENT_TOOLS, CODE_EXECUTION_SANDBOX_REQUIRED_MESSAGE } from './tools.js';
 
 export const DATABRICKS_STREAM_FORMAT = 'databricks';
 
@@ -43,34 +43,19 @@ export interface AttachDatabricksAgentSessionOptions {
   child: InProcessAgentChild;
   prompt: string;
   cwd: string;
-  /** Serving endpoint name; null / 'default' uses `OD_DATABRICKS_SERVING_ENDPOINT`. */
+  /**
+   * Serving endpoint name; null / 'default' uses `OD_DATABRICKS_SERVING_ENDPOINT`,
+   * else the first READY chat endpoint discovered for the caller.
+   */
   model: string | null;
-  readableRoots?: string[];
-  /** Daemon env: Databricks host / service-principal config. */
+  /** Daemon env: Databricks host / service-principal config. Never reaches tools. */
   env?: NodeJS.ProcessEnv;
-  /** Env for tool commands (the run's agent env). Databricks secrets are stripped. */
-  executorEnv?: NodeJS.ProcessEnv;
   userToken: string | null;
   emit: (event: DatabricksHarnessEvent) => void;
   /** Called with the auth source in use (never the token), once per change. */
   onCredentialSource?: (source: ServingCredentialSource | null) => void;
   fetch?: FetchLike;
   executor?: AgentExecutor;
-}
-
-export function resolveServingEndpointForModel(model: string | null, env: NodeJS.ProcessEnv): string {
-  const trimmed = model?.trim();
-  return trimmed && trimmed !== 'default' ? trimmed : defaultServingEndpoint(env);
-}
-
-// Model-driven shell commands must never see the credentials the daemon uses
-// to call Model Serving.
-const DATABRICKS_SECRET_ENV_KEYS = ['DATABRICKS_TOKEN', 'DATABRICKS_CLIENT_SECRET', 'DATABRICKS_CLIENT_ID'];
-
-function withoutDatabricksSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out = { ...env };
-  for (const key of DATABRICKS_SECRET_ENV_KEYS) delete out[key];
-  return out;
 }
 
 /**
@@ -99,20 +84,36 @@ export function attachDatabricksAgentSession(
       return credential;
     },
   });
-  const executor = options.executor ?? createRunExecutor({
-    cwd: options.cwd,
-    ...(options.readableRoots ? { readableRoots: options.readableRoots } : {}),
-    env: withoutDatabricksSecrets(options.executorEnv ?? env),
-  });
-  return runDatabricksAgent({
-    client,
-    endpoint: resolveServingEndpointForModel(options.model, env),
-    prompt: options.prompt,
-    tools: BUILTIN_AGENT_TOOLS,
-    executor,
-    emit: options.emit,
-    signal: options.child.abortSignal,
-  }).then(
+  // File tools are confined to the project cwd and there is no local code
+  // execution, so no env (and no daemon credential) is handed to the executor.
+  const executor = options.executor ?? createRunExecutor({ cwd: options.cwd });
+  const run = async (): Promise<DatabricksAgentRunResult> => {
+    let endpoint: string;
+    try {
+      endpoint = await resolveServingEndpoint({
+        model: options.model,
+        env,
+        client,
+        signal: options.child.abortSignal,
+      });
+    } catch (err) {
+      if (options.child.abortSignal.aborted) return { status: 'canceled', turns: 0, usage: {} };
+      const code = err instanceof DatabricksServingError ? err.code : 'DATABRICKS_AGENT_FAILED';
+      const message = (err as Error)?.message ?? String(err);
+      options.emit({ type: 'error', message, code });
+      return { status: 'failed', turns: 0, usage: {}, error: { code, message } };
+    }
+    return runDatabricksAgent({
+      client,
+      endpoint,
+      prompt: options.prompt,
+      tools: BUILTIN_AGENT_TOOLS,
+      executor,
+      emit: options.emit,
+      signal: options.child.abortSignal,
+    });
+  };
+  return run().then(
     (result) => {
       if (result.status === 'canceled') options.child.finish(null, 'SIGTERM');
       else options.child.finish(result.status === 'succeeded' ? 0 : 1);
@@ -156,9 +157,9 @@ export async function testDatabricksAgentConnection(options: {
   fetch?: FetchLike;
 }): Promise<DatabricksConnectionTestResult> {
   const env = options.env ?? process.env;
-  const endpoint = resolveServingEndpointForModel(options.model, env);
   const startedAt = Date.now();
-  const base = { model: endpoint, agentName: options.agentName };
+  let endpoint = options.model?.trim() || 'default';
+  const base = () => ({ model: endpoint, agentName: options.agentName });
   const client = createDatabricksServingClient({
     hostOrigin: databricksHostOrigin(env),
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -170,6 +171,7 @@ export async function testDatabricksAgentConnection(options: {
       }),
   });
   try {
+    endpoint = await resolveServingEndpoint({ model: options.model, env, client, ...(options.signal ? { signal: options.signal } : {}) });
     let sample = '';
     for await (const event of client.streamChat({
       endpoint,
@@ -179,13 +181,16 @@ export async function testDatabricksAgentConnection(options: {
     })) {
       if (event.type === 'text') sample += event.delta;
     }
-    return { ...base, ok: true, kind: 'success', latencyMs: Date.now() - startedAt, sample: sample.slice(0, 120) };
+    return { ...base(), ok: true, kind: 'success', latencyMs: Date.now() - startedAt, sample: sample.slice(0, 120) };
   } catch (err) {
     const latencyMs = Date.now() - startedAt;
     const detail = (err as Error)?.message ?? String(err);
     if (err instanceof DatabricksServingError) {
+      if (err.code === 'DATABRICKS_SERVING_CONFIG') {
+        return { ...base(), ok: false, kind: 'not_found_model', latencyMs, detail };
+      }
       if (err.code === 'DATABRICKS_AUTH_REQUIRED' || err.code === 'DATABRICKS_HOST_MISSING') {
-        return { ...base, ok: false, kind: 'agent_auth_required', latencyMs, detail };
+        return { ...base(), ok: false, kind: 'agent_auth_required', latencyMs, detail };
       }
       const status = err.status;
       const kind = status === 401
@@ -197,8 +202,8 @@ export async function testDatabricksAgentConnection(options: {
             : status === 429
               ? 'rate_limited'
               : 'upstream_unavailable';
-      return { ...base, ok: false, kind, latencyMs, detail, ...(status ? { status } : {}) };
+      return { ...base(), ok: false, kind, latencyMs, detail, ...(status ? { status } : {}) };
     }
-    return { ...base, ok: false, kind: 'unknown', latencyMs, detail };
+    return { ...base(), ok: false, kind: 'unknown', latencyMs, detail };
   }
 }

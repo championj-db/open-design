@@ -57,6 +57,7 @@ import {
   workspaceContextHasTeamIdentity,
 } from '@open-design/contracts';
 import {
+  AMR_ACCOUNT_UI_ENABLED,
   fetchVelaLoginStatus,
   formatVelaBalanceUsd,
   velaLogout,
@@ -1814,21 +1815,28 @@ export function EntryTopRightCluster({
                       >
                         <Icon name="sparkles" size={15} /> {t('entry.accountFeatureRequest')}
                       </a>
-                      <div className="entry-nav-rail__menu-divider" />
-                      <button
-                        type="button"
-                        className="entry-nav-rail__menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          trackAccountAction('logout');
-                          closeAccountMenu();
-                          // recvqgMWpJZqhL: never sign out on this click alone —
-                          // arm the confirmation dialog and let it run the logout.
-                          setConfirmSignOut(true);
-                        }}
-                      >
-                        <Icon name="log-out" size={15} /> {t('entry.accountSignOut')}
-                      </button>
+                      {/* AMR (vela) sign-out. Hidden while the AMR account UI is off:
+                          on Databricks the identity is the platform's OBO user and
+                          there is no in-app session to end. */}
+                      {AMR_ACCOUNT_UI_ENABLED ? (
+                        <>
+                          <div className="entry-nav-rail__menu-divider" />
+                          <button
+                            type="button"
+                            className="entry-nav-rail__menu-item"
+                            role="menuitem"
+                            onClick={() => {
+                              trackAccountAction('logout');
+                              closeAccountMenu();
+                              // recvqgMWpJZqhL: never sign out on this click alone —
+                              // arm the confirmation dialog and let it run the logout.
+                              setConfirmSignOut(true);
+                            }}
+                          >
+                            <Icon name="log-out" size={15} /> {t('entry.accountSignOut')}
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   </>
                 ) : null}

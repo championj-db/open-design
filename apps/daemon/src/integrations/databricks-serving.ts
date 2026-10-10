@@ -23,11 +23,58 @@ import { databricksHostOrigin } from '../auth/databricks-obo.js';
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export const DATABRICKS_SERVING_ENDPOINT_ENV = 'OD_DATABRICKS_SERVING_ENDPOINT';
-/** Used when `OD_DATABRICKS_SERVING_ENDPOINT` is unset. */
-export const DEFAULT_DATABRICKS_SERVING_ENDPOINT = 'databricks-claude-sonnet-4-5';
 
-export function defaultServingEndpoint(env: NodeJS.ProcessEnv = process.env): string {
-  return env[DATABRICKS_SERVING_ENDPOINT_ENV]?.trim() || DEFAULT_DATABRICKS_SERVING_ENDPOINT;
+/** The configured default serving endpoint, or null when none is configured. */
+export function configuredServingEndpoint(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env[DATABRICKS_SERVING_ENDPOINT_ENV]?.trim() || null;
+}
+
+/**
+ * Chat-capable, READY serving endpoints, Claude-family first. Endpoints whose
+ * task is unknown are kept (external-model endpoints often omit it);
+ * embeddings and other non-chat tasks, and endpoints that are not READY, are
+ * dropped — a not-ready endpoint cannot answer a run.
+ */
+export function readyChatEndpoints(endpoints: readonly ServingEndpointSummary[]): ServingEndpointSummary[] {
+  return endpoints
+    .filter((endpoint) => endpoint.ready && (!endpoint.task || endpoint.task.includes('chat')))
+    .sort((a, b) => {
+      const claudeA = a.name.includes('claude') ? 0 : 1;
+      const claudeB = b.name.includes('claude') ? 0 : 1;
+      return claudeA - claudeB || a.name.localeCompare(b.name);
+    });
+}
+
+/**
+ * The serving endpoint a run calls: the explicitly selected model, else
+ * `OD_DATABRICKS_SERVING_ENDPOINT`, else the first READY chat endpoint the
+ * caller can see. There is no hard-coded fallback — a workspace without that
+ * endpoint would only fail later with a confusing 404.
+ */
+export async function resolveServingEndpoint(options: {
+  model: string | null;
+  env: NodeJS.ProcessEnv;
+  client: Pick<DatabricksServingClient, 'listEndpoints'>;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const selected = options.model?.trim();
+  if (selected && selected !== 'default') return selected;
+  const configured = configuredServingEndpoint(options.env);
+  if (configured) return configured;
+  let discovered: ServingEndpointSummary[] = [];
+  try {
+    discovered = readyChatEndpoints(await options.client.listEndpoints(options.signal));
+  } catch (err) {
+    if (err instanceof DatabricksServingError && err.code !== 'DATABRICKS_SERVING_HTTP') throw err;
+    // Listing failed: fall through to the configuration error below.
+  }
+  const first = discovered[0];
+  if (first) return first.name;
+  throw new DatabricksServingError(
+    'DATABRICKS_SERVING_CONFIG',
+    `No Model Serving endpoint is configured: set ${DATABRICKS_SERVING_ENDPOINT_ENV} ` +
+      'or make a READY chat serving endpoint available to this user',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +93,7 @@ export class DatabricksServingError extends Error {
     readonly code:
       | 'DATABRICKS_AUTH_REQUIRED'
       | 'DATABRICKS_HOST_MISSING'
+      | 'DATABRICKS_SERVING_CONFIG'
       | 'DATABRICKS_SERVING_HTTP'
       | 'DATABRICKS_SERVING_STREAM',
     message: string,
@@ -299,7 +347,9 @@ export function createDatabricksServingClient(
         yield* eventsFromCompletion(json);
         return;
       }
-      if (!response.body) return;
+      if (!response.body) {
+        throw new DatabricksServingError('DATABRICKS_SERVING_STREAM', 'Model Serving returned an empty response');
+      }
       yield* decodeChatCompletionStream(response.body);
     },
 
@@ -410,13 +460,32 @@ function* eventsFromCompletion(json: any): Generator<ServingStreamEvent> {
   yield* eventsFromChunk(json);
 }
 
-/** Decode an OpenAI-style `data: {...}` SSE body into stream events. */
+/**
+ * Decode an SSE body of Chat Completions chunks into stream events.
+ *
+ * Follows the SSE framing rules: an event is the `data:` lines up to the next
+ * blank line, joined with `\n`, so a JSON payload split across several
+ * `data:` lines parses. OpenAI-style streams (one `data:` line per event)
+ * are the one-line case of the same rule. Other fields (`event:`, `id:`,
+ * comments) are ignored.
+ */
 export async function* decodeChatCompletionStream(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<ServingStreamEvent> {
   const decoder = new TextDecoder();
   const reader = body.getReader();
   let buffer = '';
+  let dataLines: string[] = [];
+  // Dispatch the accumulated event; true means the stream sent `[DONE]`.
+  function* dispatch(): Generator<ServingStreamEvent, boolean> {
+    if (dataLines.length === 0) return false;
+    const data = dataLines.join('\n');
+    dataLines = [];
+    const event = parseSseData(data);
+    if (event === 'done') return true;
+    if (event) yield* eventsFromChunk(event);
+    return false;
+  }
   try {
     for (;;) {
       const { value, done } = await reader.read();
@@ -426,13 +495,16 @@ export async function* decodeChatCompletionStream(
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline).replace(/\r$/, '');
         buffer = buffer.slice(newline + 1);
-        const event = parseSseLine(line);
-        if (event === 'done') return;
-        if (event) yield* eventsFromChunk(event);
+        if (line === '') {
+          if (yield* dispatch()) return;
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(line.startsWith('data: ') ? 6 : 5));
+        }
       }
       if (done) {
-        const event = parseSseLine(buffer.trim());
-        if (event && event !== 'done') yield* eventsFromChunk(event);
+        const tail = buffer.replace(/\r$/, '');
+        if (tail.startsWith('data:')) dataLines.push(tail.slice(tail.startsWith('data: ') ? 6 : 5));
+        yield* dispatch();
         return;
       }
     }
@@ -441,9 +513,8 @@ export async function* decodeChatCompletionStream(
   }
 }
 
-function parseSseLine(line: string): unknown | 'done' | null {
-  if (!line.startsWith('data:')) return null;
-  const data = line.slice(5).trim();
+function parseSseData(raw: string): unknown | 'done' | null {
+  const data = raw.trim();
   if (!data) return null;
   if (data === '[DONE]') return 'done';
   let parsed: any;

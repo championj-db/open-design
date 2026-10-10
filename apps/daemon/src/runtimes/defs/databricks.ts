@@ -2,7 +2,8 @@ import { databricksHostOrigin } from '../../auth/databricks-obo.js';
 import { getCurrentUserAccessToken } from '../../auth/current-user.js';
 import {
   createDatabricksServingClient,
-  defaultServingEndpoint,
+  configuredServingEndpoint,
+  readyChatEndpoints,
   resolveServingCredential,
   servicePrincipalFromEnv,
 } from '../../integrations/databricks-serving.js';
@@ -12,29 +13,19 @@ import type { RuntimeAgentDef, RuntimeModelOption } from '../types.js';
 export const DATABRICKS_AGENT_ID = 'databricks';
 
 function defaultEndpointOption(env: NodeJS.ProcessEnv): RuntimeModelOption {
-  return { ...DEFAULT_MODEL_OPTION, label: `Default (${defaultServingEndpoint(env)})` };
+  const configured = configuredServingEndpoint(env);
+  return configured ? { ...DEFAULT_MODEL_OPTION, label: `Default (${configured})` } : DEFAULT_MODEL_OPTION;
 }
 
-// Chat-capable serving endpoints, Claude-family first. Endpoints whose task is
-// unknown are kept (external-model endpoints often omit it); embeddings and
-// other non-chat tasks are dropped.
-function servingEndpointModels(
+// Only READY chat endpoints are selectable: a not-ready endpoint cannot
+// answer a run, so listing it would only offer a guaranteed failure.
+export function servingEndpointModels(
   endpoints: Array<{ name: string; task: string | null; ready: boolean }>,
   env: NodeJS.ProcessEnv,
 ): RuntimeModelOption[] {
-  const chat = endpoints
-    .filter((endpoint) => !endpoint.task || endpoint.task.includes('chat'))
-    .sort((a, b) => {
-      const claudeA = a.name.includes('claude') ? 0 : 1;
-      const claudeB = b.name.includes('claude') ? 0 : 1;
-      return claudeA - claudeB || a.name.localeCompare(b.name);
-    });
   return [
     defaultEndpointOption(env),
-    ...chat.map((endpoint) => ({
-      id: endpoint.name,
-      label: endpoint.ready ? endpoint.name : `${endpoint.name} (not ready)`,
-    })),
+    ...readyChatEndpoints(endpoints).map((endpoint) => ({ id: endpoint.name, label: endpoint.name })),
   ];
 }
 

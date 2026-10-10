@@ -88,30 +88,11 @@ describe('AMR attribution helper', () => {
       }),
       undefined,
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/integrations/vela/analytics-entry',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      payload: {
-        pageName: 'open_design',
-        sourcePageName: 'chat_panel',
-        area: 'amr_entry',
-        element: 'chat_error_recharge',
-        action: 'click_amr_entry',
-        entryId: attribution.entryId,
-        sourceProduct: 'open_design',
-        sourceDetail: 'chat_error_recharge',
-        entryOccurredAt: '2026-06-03T12:00:00.000Z',
-      },
-    });
+    // The Vela analytics mirror route was removed: nothing is forwarded.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('attaches the persisted onboarding profile and forwards it to AMR', () => {
+  it('attaches the persisted onboarding profile without forwarding it to the removed AMR mirror', () => {
     saveOnboardingProfile({
       role: 'pm',
       orgSize: 'startup',
@@ -131,13 +112,8 @@ describe('AMR attribution helper', () => {
       odUseCase: ['product', 'design-system'],
       odSource: 'github',
     });
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body)).payload).toMatchObject({
-      odRole: 'pm',
-      odOrgSize: 'startup',
-      odUseCase: ['product', 'design-system'],
-      odSource: 'github',
-    });
+    // The Vela analytics mirror route was removed: nothing is forwarded.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('omits profile fields entirely when no onboarding profile is stored', () => {
@@ -151,8 +127,8 @@ describe('AMR attribution helper', () => {
 
     expect(attribution.odRole).toBeUndefined();
     expect(attribution.odOrgSize).toBeUndefined();
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body)).payload).not.toHaveProperty('odRole');
+    // The Vela analytics mirror route was removed: nothing is forwarded.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('reuses a previous entry id for follow-up actions in the same source path', () => {
@@ -173,7 +149,7 @@ describe('AMR attribution helper', () => {
 
     expect(second).toEqual(first);
     expect(track).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(readAmrAttribution(new Date('2026-06-03T12:00:05.000Z'))).toEqual(
       first,
     );
@@ -210,33 +186,8 @@ describe('AMR attribution helper', () => {
       odSource: 'github',
     });
     expect(readAmrAttribution(profileTime)).toEqual(updated);
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/integrations/vela/analytics-profile',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      payload: {
-        pageName: 'open_design',
-        sourcePageName: 'onboarding',
-        area: 'onboarding',
-        element: 'about_you_submit',
-        action: 'submit_profile',
-        entryId: attribution.entryId,
-        sourceProduct: 'open_design',
-        sourceDetail: 'onboarding_amr_card',
-        entryOccurredAt: '2026-06-03T12:00:00.000Z',
-        profileOccurredAt: '2026-06-03T12:03:00.000Z',
-        odDeviceId: 'od-install-abc',
-        odRole: 'pm',
-        odOrgSize: 'startup',
-        odUseCase: ['product', 'design-system'],
-        odSource: 'github',
-      },
-    });
+    // The Vela analytics mirror route was removed: nothing is forwarded.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not mirror AMR entry analytics without metrics consent', () => {

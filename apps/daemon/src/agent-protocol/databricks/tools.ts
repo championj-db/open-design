@@ -40,7 +40,9 @@ const readTool: AgentTool = {
     type: 'function',
     function: {
       name: 'Read',
-      description: 'Read a UTF-8 text file. Paths are relative to the project directory (absolute paths inside it also work).',
+      description:
+        'Read a UTF-8 text file. Paths are relative to the project directory (absolute paths inside it also work); ' +
+        'nothing outside the project can be read.',
       parameters: {
         type: 'object',
         properties: { file_path: { type: 'string', description: 'File to read' } },
@@ -138,12 +140,19 @@ const listTool: AgentTool = {
   },
 };
 
+/** Returned for every `Bash` call when the executor has no isolated sandbox. */
+export const CODE_EXECUTION_SANDBOX_REQUIRED_MESSAGE =
+  'Code execution requires the Databricks sandbox (not yet enabled). ' +
+  'Shell commands cannot run here; use Read, Write, Edit and LS to work with project files.';
+
 const bashTool: AgentTool = {
   spec: {
     type: 'function',
     function: {
       name: 'Bash',
-      description: 'Run a shell command in the project directory and return its output.',
+      description:
+        'Run a shell command in the project directory and return its output. ' +
+        'Only available when the Databricks sandbox is enabled; otherwise every call is refused.',
       parameters: {
         type: 'object',
         properties: {
@@ -155,6 +164,9 @@ const bashTool: AgentTool = {
     },
   },
   async run(input, { executor, signal }) {
+    // Disabled unless the executor is an isolated sandbox: the local executor
+    // deliberately has no `runCommand` (see executor.ts).
+    if (!executor.runCommand) return { content: CODE_EXECUTION_SANDBOX_REQUIRED_MESSAGE, isError: true };
     const command = requireString(input, 'command');
     const result = await executor.runCommand(command, {
       ...(typeof input.timeout === 'number' ? { timeoutMs: input.timeout } : {}),
