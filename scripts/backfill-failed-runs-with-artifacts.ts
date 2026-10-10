@@ -21,14 +21,15 @@
 //   node --experimental-strip-types scripts/backfill-failed-runs-with-artifacts.ts --data-dir /path/to/.od --dry-run
 //   node --experimental-strip-types scripts/backfill-failed-runs-with-artifacts.ts --data-dir /path/to/.od
 //
-// STOP THE DAEMON FIRST so the WAL is flushed and this does not race a write.
+// Needs the built daemon (apps/daemon/dist) and the daemon database env
+// (DATABASE_URL / PG* / LAKEBASE_*). Stop the daemon first so this does not
+// race a write.
 // --dry-run prints the rows it would flip without writing. Re-running is
 // idempotent (only rows still 'failed' are touched).
 
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -42,11 +43,15 @@ interface BackfillDatabase {
   close: () => void;
 }
 
-// better-sqlite3 is a native module owned by the daemon workspace; resolve it
-// from there (matching scripts/seed-test-projects.ts) rather than the root.
-function loadBetterSqlite(): new (filename: string) => BackfillDatabase {
-  const daemonRequire = createRequire(path.join(REPO_ROOT, 'apps', 'daemon', 'package.json'));
-  return daemonRequire('better-sqlite3') as new (filename: string) => BackfillDatabase;
+// The daemon's relational store is Postgres, located by DATABASE_URL / PG* /
+// LAKEBASE_* env (see apps/daemon/src/storage/daemon-db.ts). Reuse the built
+// daemon's connection + migrations rather than opening it by hand.
+async function openDaemonDatabase(dataDir: string): Promise<BackfillDatabase> {
+  const dbModule = pathToFileURL(path.join(REPO_ROOT, 'apps', 'daemon', 'dist', 'db.js')).href;
+  const { openDatabase } = (await import(dbModule)) as {
+    openDatabase: (projectRoot: string, options: { dataDir: string }) => BackfillDatabase;
+  };
+  return openDatabase(REPO_ROOT, { dataDir });
 }
 
 function parseArgs(argv: string[]): { dataDir: string; dryRun: boolean } {
@@ -117,17 +122,15 @@ function messageProducedArtifact(
   return false;
 }
 
-function main() {
+async function main() {
   const { dataDir, dryRun } = parseArgs(process.argv.slice(2));
-  const dbPath = path.join(dataDir, 'app.sqlite');
   const projectsRoot = path.join(dataDir, 'projects');
 
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`No sqlite db at ${dbPath} (is --data-dir correct?)`);
+  if (!fs.existsSync(dataDir)) {
+    throw new Error(`No daemon data dir at ${dataDir} (is --data-dir correct?)`);
   }
 
-  const Database = loadBetterSqlite();
-  const db = new Database(dbPath);
+  const db = await openDaemonDatabase(dataDir);
   try {
     const rows = db
       .prepare(
@@ -182,4 +185,4 @@ function main() {
   }
 }
 
-main();
+await main();
