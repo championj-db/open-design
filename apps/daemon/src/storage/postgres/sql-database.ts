@@ -108,6 +108,11 @@ function getBridge(): Bridge {
   return bridge;
 }
 
+/** True once this process has started the pg worker (opened any handle). */
+export function sqlBridgeStarted(): boolean {
+  return bridge !== null;
+}
+
 function queryTimeoutMs(): number {
   const raw = Number(process.env.OD_PG_QUERY_TIMEOUT_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 300_000;

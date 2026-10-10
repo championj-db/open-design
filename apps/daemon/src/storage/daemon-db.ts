@@ -176,6 +176,9 @@ function resolveConnection(e: Record<string, string | undefined>): DaemonDbConfi
   );
 }
 
+/** `COMMENT ON SCHEMA` prefix naming the data root a derived schema belongs to. */
+export const DATA_DIR_SCHEMA_COMMENT_PREFIX = 'od-data-dir:';
+
 /** Schema name derived from a daemon data root (OD_PG_SCHEMA_PER_DATA_DIR=1). */
 export function schemaForDataDir(dataDir: string): string {
   return `od_${createHash('sha256').update(path.resolve(dataDir)).digest('hex').slice(0, 24)}`;

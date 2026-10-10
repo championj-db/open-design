@@ -56,7 +56,12 @@ import {
 } from './runtimes/run-event-payload-budget.js';
 import { migrateStrategyTaskStore } from './strategies/task-store.js';
 import { observeRead } from './services/daemon-health.js';
-import { describeDaemonDbConfig, resolveDaemonDbConfigForDataDir } from './storage/daemon-db.js';
+import {
+  DATA_DIR_SCHEMA_COMMENT_PREFIX,
+  describeDaemonDbConfig,
+  resolveDaemonDbConfigForDataDir,
+  schemaForDataDir,
+} from './storage/daemon-db.js';
 import { runMigrations, type Migration } from './storage/postgres/migrations.js';
 import { SqlDatabase, type SqlStatement } from './storage/postgres/sql-database.js';
 
@@ -93,6 +98,11 @@ export function openDatabase(projectRoot: string, { dataDir }: { dataDir?: strin
   const db = new SqlDatabase({ config, name: describeDaemonDbConfig(config) });
   try {
     migrate(db);
+    if (config.schema && config.schema === schemaForDataDir(dir)) {
+      // Record which data root owns a derived schema, so tooling can find
+      // (and the test harness can drop) schemas whose data root is gone.
+      db.exec(`COMMENT ON SCHEMA "${config.schema}" IS '${DATA_DIR_SCHEMA_COMMENT_PREFIX}${dir.replace(/'/g, "''")}'`);
+    }
   } catch (error) {
     db.close();
     throw error;
@@ -248,16 +258,16 @@ function migrateCore(db: SqliteDb): void {
       ON conversations(project_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS agent_sessions (
-      conversation_id TEXT NOT NULL,
-      agent_id        TEXT NOT NULL,
-      session_id      TEXT NOT NULL,
-      stable_prompt_hash TEXT,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      agent_id        TEXT COLLATE "C" NOT NULL,
+      session_id      TEXT COLLATE "C" NOT NULL,
+      stable_prompt_hash TEXT COLLATE "C",
       -- Per-section digests of the stable prefix inputs behind
       -- stable_prompt_hash, as JSON (see prompts/stable-sections.ts). Purely
       -- diagnostic: when the hash moves, diffing this against the current turn
       -- names WHICH input drifted. Never gates a re-send -- stable_prompt_hash
       -- stays the only source of truth for that.
-      stable_prompt_sections TEXT,
+      stable_prompt_sections TEXT COLLATE "C",
       -- Resume identity guard: the session is only safe to resume when the
       -- conversation has not changed shape under it. model/cwd are the runtime
       -- identity the upstream session was created with; a change forces a fresh
@@ -265,13 +275,13 @@ function migrateCore(db: SqliteDb): void {
       -- on its last turn -- if it is no longer the latest completed assistant
       -- turn (another agent ran in between, or it was edited away), the session
       -- is behind and we reseed the full transcript.
-      model           TEXT,
-      cwd             TEXT,
-      last_message_id TEXT,
+      model           TEXT COLLATE "C",
+      cwd             TEXT COLLATE "C",
+      last_message_id TEXT COLLATE "C",
       -- Last provider-reported effective input usage for this exact session.
       -- Observability only: never used to admit, reject, compact, or roll over.
-      last_input_tokens INTEGER,
-      updated_at      INTEGER NOT NULL,
+      last_input_tokens BIGINT,
+      updated_at      BIGINT NOT NULL,
       PRIMARY KEY (conversation_id, agent_id),
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );

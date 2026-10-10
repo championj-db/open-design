@@ -19,8 +19,18 @@ export interface TestDatabaseOptions {
   migrate?: boolean;
 }
 
+const TEST_SCHEMAS = Symbol.for('open-design.daemon.testSchemas');
+
+/** Schemas created by createTestDatabase in this process (dropped by tests/setup.ts). */
+function testSchemaRegistry(): Set<string> {
+  const state = globalThis as typeof globalThis & { [TEST_SCHEMAS]?: Set<string> };
+  state[TEST_SCHEMAS] ??= new Set();
+  return state[TEST_SCHEMAS];
+}
+
 export function createTestDatabase(options: TestDatabaseOptions = {}): SqlDatabase {
   const schema = `od_t_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+  testSchemaRegistry().add(schema);
   const config = { ...resolveDaemonDbConfig(), schema };
   const db = new SqlDatabase({ config, name: `test:${schema}` });
   if (options.migrate !== false) migrate(db);
@@ -31,6 +41,7 @@ export function createTestDatabase(options: TestDatabaseOptions = {}): SqlDataba
     if (!db.open) return db;
     try {
       db.exec(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      testSchemaRegistry().delete(schema);
     } catch {
       // Best effort: the cluster is disposable.
     }

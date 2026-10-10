@@ -59,7 +59,13 @@ export default async function setup(): Promise<(() => void) | void> {
     '-D', dataDir,
     '-l', path.join(dir, 'postgres.log'),
     '-w',
-    '-o', `-p ${port} -k ${dir} -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=500`,
+    '-o', [
+      `-p ${port} -k ${dir} -c listen_addresses=127.0.0.1 -c max_connections=500`,
+      // Disposable cluster: no durability, and keep WAL small so a full run
+      // does not fill the disk.
+      '-c fsync=off -c synchronous_commit=off -c full_page_writes=off',
+      '-c wal_level=minimal -c max_wal_senders=0 -c max_wal_size=64MB -c min_wal_size=32MB',
+    ].join(' '),
     'start',
   ], { stdio: 'ignore' });
   process.env.DATABASE_URL = `postgres://postgres@127.0.0.1:${port}/postgres`;
