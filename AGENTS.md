@@ -51,7 +51,6 @@ This file is the single source of truth for agents entering this repository. Rea
 - Historical Windows-specific friction is documented in closed issues #10, #96, #100, #203, and #315; check the issue tracker for the current state before filing new reports.
 - Install Node 24. Either `winget install OpenJS.NodeJS.LTS` (currently Node 24.x) or download from https://nodejs.org. After install, verify with `node --version` — the WinGet LTS pointer rolls to the next major in October 2026, so re-verify if you re-run the install command later. Do not use Node 22 — see FAQ.
 - `corepack enable` fails with EPERM on Windows (cannot write shims to `Program Files`). Use `npm install -g pnpm@10.33.2` instead.
-- `better-sqlite3` has no prebuilt binary for win32/Node 24; `pnpm install` will compile it from source via node-gyp (~2 min). Requires Visual Studio Build Tools 2022 or newer. This is expected — not a sign of version incompatibility.
 - For `tools-dev` start/stop/status usage, see "Local lifecycle" below.
 
 ## Local lifecycle
@@ -84,10 +83,11 @@ The daemon has one active data-root truth source:
 - `PROJECTS_DIR` is the managed-project root. Imported-folder projects are the
   explicit exception: they use `metadata.baseDir` for the user-selected
   external workspace.
-- `ARTIFACTS_DIR`, SQLite, app config, memory, MCP config/tokens, automation
-  state, plugin state, connector credentials, generated files, logs owned by
-  sandbox mode, and agent runtime homes are daemon data and must remain under
-  the resolved daemon data root unless this file names a specific exception.
+- `ARTIFACTS_DIR`, the local SQLite side files (diagnostics and telemetry
+  outboxes), app config, memory, MCP config/tokens, automation state, plugin
+  state, connector credentials, generated files, logs owned by sandbox mode,
+  and agent runtime homes are daemon data and must remain under the resolved
+  daemon data root unless this file names a specific exception.
 - Agent subprocesses receive the resolved daemon data root as `OD_DATA_DIR`.
   They must inherit the daemon's truth source instead of guessing their own
   data path.
@@ -111,6 +111,12 @@ Packaged propagation:
   ports, channel names, or namespace names.
 
 Sanctioned exceptions:
+
+- The daemon's relational database is PostgreSQL (Databricks Lakebase in
+  production). It is located by connection env (`DATABASE_URL`, `PG*`,
+  `LAKEBASE_*`; see `apps/daemon/src/storage/daemon-db.ts`), not by a path
+  under the data root. `OD_PG_SCHEMA_PER_DATA_DIR=1` derives the schema from
+  the resolved data root so isolated data roots get isolated relational state.
 
 - `OD_MEDIA_CONFIG_DIR` is a narrow override for `media-config.json` only. It
   is not a second daemon data root.
@@ -470,4 +476,4 @@ Run `pnpm install` after changing package manifests, workspace layout, command e
 
 ## Can I use Node 22 instead of Node 24?
 
-No. `package.json#engines` specifies `node: "~24"`, which is the only supported runtime. The current lockfile pins `better-sqlite3@11.10.0`; on Windows it has no prebuilt binary for Node 24 and is built from source via node-gyp (see the Windows native section). Older Node versions are not tested and may hit lockfile or dependency incompatibilities.
+No. `package.json#engines` specifies `node: "~24"`, which is the only supported runtime. The daemon also relies on Node 24 built-ins such as `node:sqlite`. Older Node versions are not tested and may hit lockfile or dependency incompatibilities.

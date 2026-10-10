@@ -4,7 +4,7 @@ Follow the root `AGENTS.md` and `apps/AGENTS.md` first. This file records daemon
 
 ## Role
 
-`apps/daemon` is the local Express + SQLite daemon and owns:
+`apps/daemon` is the Express + PostgreSQL (Lakebase) daemon and owns:
 
 - `/api/*` HTTP routes and SSE streams.
 - The `od` CLI entrypoint in `src/cli.ts`.
@@ -38,7 +38,7 @@ Do not keep adding unrelated files directly under `src/`. The top level is curre
 - New route code belongs in `src/routes/` or an existing route subfolder such as `src/routes/plugins/`.
 - New runtime or stream-parser code belongs in `src/runtimes/`, with runtime definitions in `src/runtimes/defs/`.
 - New provider/integration client code belongs in the existing domain folder when one exists, or under `src/integrations/<provider>.ts` for provider-specific glue.
-- New persistence/storage abstractions belong in `src/storage/` unless they are tightly coupled to the legacy SQLite facade in `src/db.ts`.
+- New persistence/storage abstractions belong in `src/storage/` unless they are tightly coupled to the persistence facade in `src/db.ts`. The Postgres connection, sync bridge, SQL translation and migration runner live in `src/storage/postgres/`.
 - New prompt construction belongs in `src/prompts/`.
 - New plugin, connector, registry, research, media adapter, live-artifact, critique, metrics, logging, QA, or GenUI code belongs in the matching existing folder.
 - New general-purpose helpers should be avoided. If a helper has a real owner, put it with that owner. If it is daemon-wide infrastructure, use a focused folder such as `src/http/`, `src/services/`, `src/storage/`, or `src/runtimes/` instead of creating another top-level utility file.
@@ -118,7 +118,7 @@ When adding a user-facing capability, close the loop in one change: contract typ
 - Tests belong under `apps/daemon/tests/`, not under `src/`.
 - Use the cheapest layer that can observe the behavior: pure helper test, route-level Vitest with `startServer`, then broader integration only when necessary.
 - For bug fixes, prefer a red spec that fails before the fix.
-- If a test depends on native modules such as `better-sqlite3`, make sure local dependencies were built for the active Node version before blaming the code.
+- Tests that open the daemon database need PostgreSQL: set `DATABASE_URL`, or let `tests/global-setup-postgres.ts` provision a throwaway local cluster (needs `initdb`/`pg_ctl` on PATH or under `/usr/lib/postgresql/*/bin`).
 
 ## Commands
 
