@@ -348,6 +348,9 @@ export function translateSql(sql: string): TranslatedSql {
       // (so placeholders keep one binding each):
       //   (SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE max(od_v) END
       //      FROM (VALUES (a), (b)) AS od_scalar(od_v))
+      // Limitation: VALUES needs one common Postgres type, so mixing e.g. text
+      // and numeric arguments errors where SQLite compared storage classes.
+      // No current call site mixes types (all compare BIGINT columns/params).
       out.push({
         kind: 'ws',
         text: `(SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE ${word}(od_v) END FROM (VALUES `,

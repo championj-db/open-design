@@ -46,6 +46,8 @@ interface ConnConfig {
 type Request =
   | { id: number; op: 'open'; handle: number; config: ConnConfig; createSchema: boolean; statementTimeoutMs?: number }
   | { id: number; op: 'crash' }
+  | { id: number; op: 'crash-after-next' }
+  | { id: number; op: 'test-options'; cancelDelayMs: number }
   | { id: number; op: 'query'; handle: number; sql: string; params: unknown[]; savepoint: boolean }
   | { id: number; op: 'exec'; handle: number; sql: string }
   | { id: number; op: 'close'; handle: number };
@@ -60,8 +62,23 @@ interface Handle {
   connectedAt: number;
   broken: boolean;
   inTransaction: boolean;
+  /**
+   * The connection was retired while a transaction was open on it. The
+   * transaction is gone; every statement fails until the caller ends it
+   * with COMMIT (which fails) or ROLLBACK.
+   */
+  txLost: boolean;
   password: (() => Promise<string>) | null;
 }
+
+const TX_LOST_ERROR = {
+  code: 'OD_BRIDGE_TX_LOST',
+  message: 'postgres transaction was lost (its connection was retired); roll it back',
+};
+
+// Test hooks (crashSqlBridgeAfterNextStatementForTests / setSqlBridgeTestOptions).
+let crashAfterNextStatement = false;
+let testCancelDelayMs = 0;
 
 // Reconnect idle (non-transactional) connections this often so a connection
 // authenticated with a short-lived Lakebase credential is never held forever.
@@ -119,6 +136,8 @@ async function connect(handle: Handle): Promise<pg.Client> {
     }
     options.password = handle.password;
   }
+  // Bound connection setup (including the side connection used to cancel).
+  options.connectionTimeoutMillis = 30_000;
   const client = new pg.Client(options);
   client.on('error', () => {
     handle.broken = true;
@@ -190,6 +209,7 @@ async function handle(request: Request): Promise<unknown> {
       connectedAt: 0,
       broken: false,
       inTransaction: false,
+      txLost: false,
       password: null,
     };
     if (request.createSchema && request.config.schema) {
@@ -216,6 +236,14 @@ async function handle(request: Request): Promise<unknown> {
     await previous?.client?.end().catch(() => {});
     return null;
   }
+  if (request.op === 'crash-after-next') {
+    crashAfterNextStatement = true;
+    return null;
+  }
+  if (request.op === 'test-options') {
+    testCancelDelayMs = request.cancelDelayMs;
+    return null;
+  }
   if (request.op === 'crash') {
     // Test hook: die without replying, as a crashed worker would.
     setImmediate(() => {
@@ -230,6 +258,18 @@ async function handle(request: Request): Promise<unknown> {
     await entry.client?.end().catch(() => {});
     entry.client = null;
     return null;
+  }
+  if (entry.txLost) {
+    // Ending the lost transaction is the only thing allowed; nothing may run
+    // on a fresh connection as if it were still inside it.
+    const head = request.op === 'exec' ? request.sql.trimStart().slice(0, 12).toUpperCase() : '';
+    const ends = head.startsWith('COMMIT') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'));
+    if (ends) {
+      entry.txLost = false;
+      entry.inTransaction = false;
+      if (head.startsWith('ROLLBACK')) return null;
+    }
+    throw TX_LOST_ERROR;
   }
   const client = await clientFor(entry);
   if (request.op === 'exec') {
@@ -299,7 +339,15 @@ function serializeError(error: unknown): Record<string, unknown> {
 }
 
 let queue: Promise<void> = Promise.resolve();
-let inFlight: { id: number; entry: Handle | undefined; cancelled: boolean } | null = null;
+
+interface InFlight {
+  id: number;
+  entry: Handle | undefined;
+  /** Set once a cancel was started; resolves when it has finished. */
+  cancel: Promise<void> | null;
+}
+
+let inFlight: InFlight | null = null;
 
 /**
  * The caller gave up waiting on the in-flight request: cancel its statement
@@ -308,8 +356,8 @@ let inFlight: { id: number; entry: Handle | undefined; cancelled: boolean } | nu
  * replies with the cancellation error, or with its result if it had already
  * finished.
  */
-async function cancelInFlight(target: { id: number; entry: Handle | undefined; cancelled: boolean }): Promise<void> {
-  target.cancelled = true;
+async function cancelInFlight(target: InFlight): Promise<void> {
+  if (testCancelDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, testCancelDelayMs));
   const entry = target.entry;
   const pid = (entry?.client as { processID?: number } | null | undefined)?.processID;
   if (!entry || typeof pid !== 'number') return;
@@ -326,20 +374,29 @@ async function cancelInFlight(target: { id: number; entry: Handle | undefined; c
   }
 }
 
+async function retireClient(entry: Handle | undefined): Promise<void> {
+  if (!entry?.client) return;
+  const old = entry.client;
+  entry.client = null;
+  if (entry.inTransaction) entry.txLost = true;
+  await old.end().catch(() => {});
+}
+
 setInterval(() => {
   const current = inFlight;
-  if (current && !current.cancelled && Atomics.load(flag, SLOT_CANCEL) === current.id) {
-    void cancelInFlight(current);
+  if (current && !current.cancel && Atomics.load(flag, SLOT_CANCEL) === current.id) {
+    current.cancel = cancelInFlight(current);
   }
 }, 100).unref();
 
 init.port.on('message', (request: Request) => {
   queue = queue.then(async () => {
-    inFlight = {
+    const current: InFlight = {
       id: request.id,
       entry: 'handle' in request ? handles.get(request.handle) : undefined,
-      cancelled: false,
+      cancel: null,
     };
+    inFlight = current;
     let reply: { id: number; ok: true; value: unknown } | { id: number; ok: false; error: unknown };
     try {
       reply = { id: request.id, ok: true, value: await handle(request) };
@@ -347,6 +404,20 @@ init.port.on('message', (request: Request) => {
       reply = { id: request.id, ok: false, error: serializeError(error) };
     }
     inFlight = null;
+    if (current.cancel) {
+      // A cancel aimed at this request's backend may still be on its way.
+      // Let it land, then retire the connection so it can never hit a later
+      // statement (or COMMIT): the next request runs on a fresh backend.
+      await current.cancel;
+      await retireClient(current.entry);
+    }
+    if (crashAfterNextStatement && request.op === 'query') {
+      // Test hook: the statement ran (and committed) but the reply is lost.
+      setImmediate(() => {
+        throw new Error('pg worker crash requested after statement');
+      });
+      return new Promise(() => {});
+    }
     init.port.postMessage(reply);
     Atomics.store(flag, SLOT_REPLY, request.id);
     Atomics.notify(flag, SLOT_REPLY);

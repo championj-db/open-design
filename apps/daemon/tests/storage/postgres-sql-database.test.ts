@@ -1,11 +1,15 @@
 // SqlDatabase: the synchronous Postgres handle the daemon's stores run on.
 // Needs the suite's Postgres (tests/global-setup-postgres.ts).
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appliedMigrationIds, runMigrations } from '../../src/storage/postgres/migrations.js';
 import {
+  crashSqlBridgeAfterNextStatementForTests,
   crashSqlBridgeForTests,
   isConstraintViolation,
+  setSqlBridgeTestOptions,
+  SQL_INDETERMINATE,
+  SQL_TX_LOST,
   SqlDatabase,
 } from '../../src/storage/postgres/sql-database.js';
 import { DAEMON_MIGRATIONS } from '../../src/db.js';
@@ -217,6 +221,127 @@ describe('SqlDatabase failure handling', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     // The existing handle reopens its connection on a fresh worker.
     expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'before' }]);
+  }, 30_000);
+
+  it('never lets a cancel aimed at one statement hit the next one', () => {
+    process.env.OD_PG_QUERY_TIMEOUT_MS = '1000';
+    const h = new SqlDatabase({ config: db.config, createSchema: false });
+    try {
+      // Statement N outlives the bridge deadline (1s); its cancel is delayed
+      // until after N has finished, which is exactly when statement N+1 would
+      // otherwise be running on the same backend.
+      setSqlBridgeTestOptions({ cancelDelayMs: 400 });
+      h.exec('SET statement_timeout = 0');
+      const before = (h.prepare('SELECT pg_backend_pid() AS pid').get() as { pid: number }).pid;
+      expect(() => h.prepare('SELECT pg_sleep(1.3)').get()).not.toThrow();
+      const next = h.prepare('SELECT pg_sleep(0.3), pg_backend_pid() AS pid').get() as { pid: number };
+      // N's connection was retired, so N+1 ran on a different backend.
+      expect(next.pid).not.toBe(before);
+    } finally {
+      setSqlBridgeTestOptions({ cancelDelayMs: 0 });
+      h.close();
+    }
+  }, 30_000);
+
+  it('retires a cancelled statement\'s transaction instead of continuing it', () => {
+    process.env.OD_PG_QUERY_TIMEOUT_MS = '1000';
+    const h = new SqlDatabase({ config: db.config, createSchema: false });
+    try {
+      const codes: unknown[] = [];
+      expect(() => h.transaction(() => {
+        h.prepare('INSERT INTO items (name) VALUES (?)').run('first');
+        h.exec('SET LOCAL statement_timeout = 0');
+        try {
+          h.prepare('SELECT pg_sleep(3)').get();
+        } catch (error) {
+          codes.push((error as { code?: string }).code);
+        }
+        try {
+          h.prepare('INSERT INTO items (name) VALUES (?)').run('after-cancel');
+        } catch (error) {
+          codes.push((error as { code?: string }).code);
+        }
+      })()).toThrow(expect.objectContaining({ code: SQL_TX_LOST }));
+      expect(codes).toEqual(['57014', SQL_TX_LOST]);
+      expect(h.inTransaction).toBe(false);
+      expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
+      expect(h.prepare('SELECT 1 AS ok').get()).toEqual({ ok: 1 });
+    } finally {
+      h.close();
+    }
+  }, 30_000);
+
+  it('reports an autocommit write whose reply was lost as indeterminate', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      crashSqlBridgeAfterNextStatementForTests();
+      let failure: unknown;
+      try {
+        db.prepare('INSERT INTO items (name) VALUES (?)').run('maybe');
+      } catch (error) {
+        failure = error;
+      }
+      expect((failure as { code?: string }).code).toBe(SQL_INDETERMINATE);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('INDETERMINATE'));
+      // It had in fact committed: "failed" would have been a lie.
+      expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'maybe' }]);
+    } finally {
+      logged.mockRestore();
+    }
+  }, 30_000);
+
+  it('reports a lost reply inside a transaction as a lost transaction, never committed', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    expect(() => db.transaction(() => {
+      db.prepare('INSERT INTO items (name) VALUES (?)').run('one');
+      crashSqlBridgeAfterNextStatementForTests();
+      db.prepare('INSERT INTO items (name) VALUES (?)').run('two');
+    })()).toThrow(expect.objectContaining({ code: SQL_TX_LOST }));
+    expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
+  }, 30_000);
+
+  it('rejects everything in a transaction whose connection died, even if the error is swallowed', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    const codes: unknown[] = [];
+    const swallow = (fn: () => void) => {
+      try {
+        fn();
+      } catch (error) {
+        codes.push((error as { code?: string }).code);
+      }
+    };
+    expect(db.inTransaction).toBe(false);
+    expect(() => db.transaction(() => {
+      db.prepare('INSERT INTO items (name) VALUES (?)').run('outer');
+      swallow(() => db.transaction(() => {
+        db.prepare('INSERT INTO items (name) VALUES (?)').run('inner');
+        swallow(() => crashSqlBridgeForTests());
+        swallow(() => db.prepare('INSERT INTO items (name) VALUES (?)').run('on-new-connection'));
+      })());
+      swallow(() => db.prepare('INSERT INTO items (name) VALUES (?)').run('after-inner'));
+      swallow(() => db.exec('SELECT 1'));
+    })()).toThrow(expect.objectContaining({ code: SQL_TX_LOST }));
+    expect(codes).toEqual(['OD_BRIDGE_UNAVAILABLE', SQL_TX_LOST, SQL_TX_LOST, SQL_TX_LOST, SQL_TX_LOST]);
+    // Depth is back where it started and nothing was committed.
+    expect(db.inTransaction).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
+    // The handle works for a NEW transaction.
+    db.transaction(() => {
+      db.prepare('INSERT INTO items (name) VALUES (?)').run('fresh');
+    })();
+    expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'fresh' }]);
+  }, 30_000);
+
+  it('rejects a lost manual BEGIN until it is rolled back', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    db.exec('BEGIN');
+    db.prepare('INSERT INTO items (name) VALUES (?)').run('manual');
+    expect(() => crashSqlBridgeForTests()).toThrow();
+    expect(() => db.prepare('SELECT 1').get()).toThrow(expect.objectContaining({ code: SQL_TX_LOST }));
+    expect(() => db.exec('COMMIT')).toThrow(expect.objectContaining({ code: SQL_TX_LOST }));
+    expect(db.inTransaction).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
   }, 30_000);
 
   it('reports the lost transaction when the worker dies inside one', () => {

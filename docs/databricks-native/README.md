@@ -74,6 +74,12 @@ suite provisions a throwaway cluster itself when `DATABASE_URL` is unset and
 
 Not migrated: existing `app.sqlite` contents are not imported into Postgres.
 
+Known limitation (until the async data layer lands): the daemon still calls
+the database synchronously through a worker thread. If that worker stops
+answering while a write or COMMIT is on the server, the outcome is unknown;
+the daemon reports it as `OD_BRIDGE_INDETERMINATE` (and logs it) instead of
+guessing. The async follow-up resolves this with idempotent operations.
+
 ## Building the bundle
 
 The daemon runs from built output, so build before deploying:

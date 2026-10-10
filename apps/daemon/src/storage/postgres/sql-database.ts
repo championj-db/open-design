@@ -17,6 +17,17 @@
 //     BEGIN IMMEDIATE);
 //   - inside a transaction a failing statement rolls back only itself;
 //   - BIGINT/NUMERIC read back as numbers and BYTEA as Buffer.
+//
+// Failure model (temporary scaffold; the async data layer replaces it):
+//   - statement_timeout on every connection is shorter than the bridge
+//     timeout; past the bridge deadline the worker cancels the statement and
+//     retires that connection, and the caller gets the real outcome.
+//   - If the worker cannot answer at all, an autocommit statement or COMMIT
+//     that already reached the server may or may not have been applied. That
+//     window cannot be closed without idempotent operations, so it surfaces
+//     as SQL_INDETERMINATE (logged), never as plain success or failure.
+//   - A connection lost inside a transaction breaks that transaction: every
+//     further statement fails with SQL_TX_LOST and it is never committed.
 
 import { MessageChannel, Worker, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import path from 'node:path';
@@ -62,6 +73,16 @@ export class SqlError extends Error {
     }
   }
 }
+
+/** The worker was unavailable; the request did not run. */
+export const SQL_BRIDGE_UNAVAILABLE = 'OD_BRIDGE_UNAVAILABLE';
+/**
+ * A statement's reply was lost after it reached the server: it may or may not
+ * have committed. Callers must not treat this as success OR failure.
+ */
+export const SQL_INDETERMINATE = 'OD_BRIDGE_INDETERMINATE';
+/** The connection under an open transaction was lost; the transaction is gone. */
+export const SQL_TX_LOST = 'OD_BRIDGE_TX_LOST';
 
 /** Postgres SQLSTATE for unique_violation. */
 export const PG_UNIQUE_VIOLATION = '23505';
@@ -228,18 +249,34 @@ function call(b: Bridge, request: Record<string, unknown>, sql: string | null): 
   // The worker is wedged or gone. Kill it so its sessions end on the server
   // (statement_timeout bounds anything still executing there).
   discardBridge(b);
-  throw new SqlError({
-    code: 'OD_BRIDGE_UNAVAILABLE',
-    message: outcome === 'dead'
-      ? 'postgres worker stopped responding'
-      : `postgres request timed out after ${queryTimeoutMs()}ms and could not be cancelled`,
-  }, sql);
+  const reason = outcome === 'dead'
+    ? 'postgres worker stopped responding'
+    : `postgres request timed out after ${queryTimeoutMs()}ms and could not be cancelled`;
+  if (request.op === 'query' || request.op === 'exec') {
+    // KNOWN LIMITATION of the synchronous bridge: the statement reached the
+    // server and its reply was lost, so it may or may not have committed. We
+    // cannot tell, and must not claim either. The async data layer will close
+    // this with idempotent operations; until then callers get a distinct
+    // indeterminate outcome (SqlDatabase narrows it inside transactions).
+    throw new SqlError({ code: SQL_INDETERMINATE, message: `${reason}; the statement may or may not have been applied` }, sql);
+  }
+  throw new SqlError({ code: SQL_BRIDGE_UNAVAILABLE, message: reason }, sql);
 }
 
 /** Test hook: make the worker thread crash while a caller is blocked on it. */
 export function crashSqlBridgeForTests(): void {
   const b = getBridge();
   call(b, { op: 'crash' }, null);
+}
+
+/** Test hook: the next statement runs, then the worker dies before replying. */
+export function crashSqlBridgeAfterNextStatementForTests(): void {
+  call(getBridge(), { op: 'crash-after-next' }, null);
+}
+
+/** Test hook: delay worker-side cancellation (to force cancel/completion races). */
+export function setSqlBridgeTestOptions(options: { cancelDelayMs: number }): void {
+  call(getBridge(), { op: 'test-options', cancelDelayMs: options.cancelDelayMs }, null);
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +344,13 @@ function reviveRow(row: Record<string, unknown>): Record<string, unknown> {
 
 // ---------------------------------------------------------------------------
 
+function txLostError(): SqlError {
+  return new SqlError({
+    code: SQL_TX_LOST,
+    message: 'postgres connection was lost inside a transaction; the transaction was rolled back',
+  }, null);
+}
+
 const WRITE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('od_write_lock:' || current_schema()))`;
 
 export interface SqlDatabaseOptions {
@@ -325,6 +369,13 @@ export class SqlDatabase {
   private isOpen = true;
   private txDepth = 0;
   private manualTx = false;
+  /**
+   * The connection under the open transaction was lost. Everything that
+   * transaction did is gone, so every further statement is rejected until it
+   * fully unwinds (the transaction wrapper, or exec('ROLLBACK') for a manual
+   * BEGIN); it is never committed.
+   */
+  private brokenTx = false;
   /** Generation of the bridge this handle's connection lives on. */
   private generation = 0;
 
@@ -339,15 +390,13 @@ export class SqlDatabase {
   /**
    * The live bridge, (re)opening this handle's connection on it when the
    * worker was replaced since the handle last used it. A connection lost in
-   * the middle of a transaction cannot be resumed, so that surfaces as an
-   * error and the transaction state is reset.
+   * the middle of a transaction cannot be resumed: the transaction is marked
+   * broken (see `brokenTx`) and the caller gets SQL_TX_LOST.
    */
   private bridgeFor(): Bridge {
     const b = getBridge();
     if (b.generation === this.generation) return b;
-    const lostTransaction = this.generation !== 0 && (this.txDepth > 0 || this.manualTx);
-    this.txDepth = 0;
-    this.manualTx = false;
+    const lostTransaction = this.generation !== 0 && this.inTransaction;
     call(b, {
       op: 'open',
       handle: this.handle,
@@ -357,13 +406,34 @@ export class SqlDatabase {
     }, null);
     this.generation = b.generation;
     if (lostTransaction) {
-      throw new SqlError({ code: 'OD_BRIDGE_UNAVAILABLE', message: 'postgres connection lost inside a transaction' }, null);
+      this.brokenTx = true;
+      throw txLostError();
     }
     return b;
   }
 
   private send(request: Record<string, unknown>, sql: string | null): unknown {
-    return call(this.bridgeFor(), { ...request, handle: this.handle }, sql);
+    if (this.brokenTx) throw txLostError();
+    try {
+      return call(this.bridgeFor(), { ...request, handle: this.handle }, sql);
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code === SQL_TX_LOST && this.inTransaction) this.brokenTx = true;
+      if (code === SQL_INDETERMINATE) {
+        const commit = typeof request.sql === 'string' && /^\s*COMMIT\b/i.test(request.sql);
+        if (this.inTransaction && !commit) {
+          // The statement was inside an uncommitted transaction whose session
+          // is gone, so nothing it did can persist: that is not ambiguous.
+          this.brokenTx = true;
+          throw txLostError();
+        }
+        console.error(
+          `[od] postgres outcome INDETERMINATE (${this.name}, op=${String(request.op)}): `
+            + `${String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, 200)}`,
+        );
+      }
+      throw error;
+    }
   }
 
   get open(): boolean {
@@ -419,16 +489,25 @@ export class SqlDatabase {
   /** Run one or more parameterless statements (simple query protocol). */
   exec(sql: string): this {
     this.assertOpen();
-    this.send({ op: 'exec', sql: translate(sql).text }, sql);
     const head = sql.trimStart().slice(0, 12).toUpperCase();
-    if (head.startsWith('BEGIN')) this.manualTx = true;
-    else if (head.startsWith('COMMIT') || head.startsWith('END') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'))) {
+    const ends = head.startsWith('COMMIT') || head.startsWith('END') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'));
+    if (this.brokenTx && this.manualTx && this.txDepth === 0 && ends) {
+      // Ending a manually begun transaction that was lost: roll back (which
+      // is all that can happen to it) and report a COMMIT as lost.
+      this.brokenTx = false;
       this.manualTx = false;
+      this.rollbackQuietly('ROLLBACK');
+      if (head.startsWith('ROLLBACK')) return this;
+      throw txLostError();
     }
+    this.send({ op: 'exec', sql: translate(sql).text }, sql);
+    if (head.startsWith('BEGIN')) this.manualTx = true;
+    else if (ends) this.manualTx = false;
     return this;
   }
 
   private rollbackQuietly(sql: string): void {
+    if (this.brokenTx) return;
     try {
       this.send({ op: 'exec', sql }, null);
     } catch {
@@ -439,9 +518,10 @@ export class SqlDatabase {
   transaction<F extends AnyFn>(fn: F): SqlTransaction<F> {
     const wrap = (writeLock: boolean): F => ((...args: unknown[]) => {
       this.assertOpen();
-      const depth = this.txDepth;
-      const savepoint = `od_tx_${depth}`;
-      const outer = depth === 0 && !this.manualTx;
+      if (this.brokenTx) throw txLostError();
+      const entryDepth = this.txDepth;
+      const savepoint = `od_tx_${entryDepth}`;
+      const outer = entryDepth === 0 && !this.manualTx;
       this.send({ op: 'exec', sql: outer ? 'BEGIN' : `SAVEPOINT ${savepoint}` }, null);
       if (outer && writeLock) {
         // A separate step, so a lock timeout leaves a transaction we can (and
@@ -453,7 +533,21 @@ export class SqlDatabase {
           throw error;
         }
       }
-      this.txDepth += 1;
+      this.txDepth = entryDepth + 1;
+      // Leave this level: restore the depth it was entered at, and if the
+      // connection was lost underneath it, clear the broken mark only once
+      // the outermost level has unwound. Returns whether it was broken.
+      const unwind = (): boolean => {
+        this.txDepth = entryDepth;
+        const broken = this.brokenTx;
+        if (broken && outer) {
+          this.brokenTx = false;
+          // Clears the worker's lost-transaction state; a no-op on a fresh
+          // connection.
+          this.rollbackQuietly('ROLLBACK');
+        }
+        return broken;
+      };
       let result: unknown;
       try {
         result = fn(...args);
@@ -461,11 +555,14 @@ export class SqlDatabase {
           throw new TypeError('Transaction function cannot return a promise');
         }
       } catch (error) {
-        this.txDepth -= 1;
-        this.rollbackQuietly(outer ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        if (!unwind()) {
+          this.rollbackQuietly(outer ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        }
         throw error;
       }
-      this.txDepth -= 1;
+      // Never COMMIT (or RELEASE into) a transaction whose connection was lost,
+      // even if the callback swallowed the error.
+      if (unwind()) throw txLostError();
       this.send({ op: 'exec', sql: outer ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}` }, null);
       return result;
     }) as F;
