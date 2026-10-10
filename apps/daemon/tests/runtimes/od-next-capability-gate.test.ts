@@ -23,7 +23,7 @@ import {
   resolveBundledOdNextRuntimeCapability,
   resolveOdNextRuntimeCapability,
 } from '../../src/runtimes/od-next-capability-gate.js';
-import { getAgentDef } from '../../src/runtimes/registry.js';
+import { AGENT_DEFS, UNREGISTERED_CLI_AGENT_DEFS } from '../../src/runtimes/registry.js';
 
 const fixtureDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -117,8 +117,14 @@ function syntheticEntry(
 
 describe('OD Next runtime capability gate', () => {
   it('binds initial path descriptors to existing runtime definitions without changing detection', () => {
+    // Descriptors name def files, registered or not (the CLI defs are
+    // unregistered on Databricks but still on disk).
+    const defs = [...AGENT_DEFS, ...UNREGISTERED_CLI_AGENT_DEFS];
     for (const descriptor of OD_NEXT_RUNTIME_PATH_DESCRIPTORS) {
-      expect(getAgentDef(descriptor.agentId)?.id).toBe(descriptor.agentId);
+      // The AMR def file was deleted with the AMR model-routing cluster; its
+      // descriptor is dead data until the OD Next registry drops it.
+      if (descriptor.agentId === 'amr') continue;
+      expect(defs.find((def) => def.id === descriptor.agentId)?.id).toBe(descriptor.agentId);
     }
   });
 

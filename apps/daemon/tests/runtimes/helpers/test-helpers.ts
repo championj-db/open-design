@@ -10,24 +10,39 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  AGENT_DEFS,
+  AGENT_DEFS as REGISTERED_AGENT_DEFS,
   applyAgentLaunchEnv,
   buildLiveArtifactsMcpServersForAgent,
   checkPromptArgvBudget,
   checkWindowsCmdShimCommandLineBudget,
   checkWindowsDirectExeCommandLineBudget,
-  detectAgents,
-  detectAgentsStream,
+  detectAgents as detectRegisteredAgents,
+  detectAgentsStream as detectRegisteredAgentsStream,
   inspectAgentExecutableResolution,
   resolveAgentLaunch,
   resolveAgentExecutable,
   spawnEnvForAgent,
 } from '../../../src/agents.js';
+import { UNREGISTERED_CLI_AGENT_DEFS } from '../../../src/runtimes/registry.js';
 import type { RuntimeAgentDef } from '../../../src/runtimes/types.js';
+
+// Every agent def file in the tree: the registered Databricks agent plus the
+// CLI runtime defs that are no longer registered (they stay on disk until the
+// follow-up strip task). Def-level tests (buildArgs, env, capability flags)
+// still exercise those files directly; registry-level behavior is asserted
+// against `REGISTERED_AGENT_DEFS`.
+const AGENT_DEFS: RuntimeAgentDef[] = [...REGISTERED_AGENT_DEFS, ...UNREGISTERED_CLI_AGENT_DEFS];
+
+/** The real `detectAgents`, run over every def file (see `AGENT_DEFS`). */
+const detectAgents = (configuredEnvByAgent: Record<string, Record<string, string>> = {}) =>
+  detectRegisteredAgents(configuredEnvByAgent, AGENT_DEFS);
+const detectAgentsStream = (configuredEnvByAgent: Record<string, Record<string, string>> = {}) =>
+  detectRegisteredAgentsStream(configuredEnvByAgent, AGENT_DEFS);
 
 export {
   assert,
   AGENT_DEFS,
+  REGISTERED_AGENT_DEFS,
   applyAgentLaunchEnv,
   buildLiveArtifactsMcpServersForAgent,
   checkPromptArgvBudget,
@@ -36,6 +51,7 @@ export {
   chmodSync,
   detectAgents,
   detectAgentsStream,
+  detectRegisteredAgents,
   inspectAgentExecutableResolution,
   join,
   mkdirSync,

@@ -192,6 +192,7 @@ export type TrackingByokProviderId =
 // CLI failed — which is the only question worth asking when an install someone
 // followed our own instructions for cannot be used.
 export type TrackingCliProviderId =
+  | 'databricks_model_serving'
   | 'claude_code'
   | 'codex_cli'
   | 'devin_for_terminal'

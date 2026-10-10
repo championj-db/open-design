@@ -18,7 +18,7 @@ import {
 } from '../../src/runtimes/defs/shared.js';
 import { traeCliAgentDef } from '../../src/runtimes/defs/trae-cli.js';
 import { installMetaForAgent } from '../../src/runtimes/metadata.js';
-import { getAgentDef } from '../../src/runtimes/registry.js';
+import { UNREGISTERED_CLI_AGENT_DEFS, getAgentDef } from '../../src/runtimes/registry.js';
 import type { RuntimeAgentDef, RuntimeEnv } from '../../src/runtimes/types.js';
 
 const rootUrl = new URL('../../../../', import.meta.url);
@@ -68,8 +68,11 @@ describe('Trae CLI runtime adapter', () => {
     );
   });
 
-  it('registers Trae CLI in the agent registry', () => {
-    expect(getAgentDef('trae-cli')).toBe(traeCliAgentDef);
+  // The Databricks agent is the only registered runtime; the Trae CLI def is
+  // kept on disk but unregistered until the CLI-runtime strip follow-up.
+  it('keeps the Trae CLI def unregistered', () => {
+    expect(getAgentDef('trae-cli')).toBeNull();
+    expect(UNREGISTERED_CLI_AGENT_DEFS).toContain(traeCliAgentDef);
   });
 
   it('exposes public install metadata and docs without internal COCO leakage', async () => {

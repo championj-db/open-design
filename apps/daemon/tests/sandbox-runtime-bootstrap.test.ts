@@ -39,7 +39,7 @@ function withEnvSnapshot<T>(
   return result;
 }
 
-test('sandbox runtime registry ignores host-local agent profiles at module load', async () => {
+test('sandbox runtime registry ignores local agent profiles at module load', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'od-sandbox-registry-'));
   const dataDir = path.join(root, 'data');
   const hostHome = path.join(root, 'host-home');
@@ -91,7 +91,11 @@ test('sandbox runtime registry ignores host-local agent profiles at module load'
         const ids = AGENT_DEFS.map((def) => def.id);
 
         assert.equal(ids.includes('host-wrapper'), false);
-        assert.equal(ids.includes('sandbox-wrapper'), true);
+        // Local agent profiles wrap a spawned CLI, so the registry no longer
+        // loads any of them (sandbox-scoped included): the in-process
+        // Databricks agent is the only registered runtime.
+        assert.equal(ids.includes('sandbox-wrapper'), false);
+        assert.deepEqual(ids, ['databricks']);
       },
     );
   } finally {

@@ -18,7 +18,14 @@ vi.mock('../../src/runtimes/launch.js', async (importOriginal) => {
 
 import * as launchModule from '../../src/runtimes/launch.js';
 import { detectAgents } from '../../src/runtimes/detection.js';
-import { AGENT_DEFS } from '../../src/runtimes/registry.js';
+import {
+  AGENT_DEFS as REGISTERED_AGENT_DEFS,
+  UNREGISTERED_CLI_AGENT_DEFS,
+} from '../../src/runtimes/registry.js';
+
+// Detection runs over every agent def file, registered or not: the probes
+// under test are per-def, and the CLI defs are unregistered on Databricks.
+const AGENT_DEFS = [...REGISTERED_AGENT_DEFS, ...UNREGISTERED_CLI_AGENT_DEFS];
 
 const mockedResolveAgentLaunch = vi.mocked(launchModule.resolveAgentLaunch);
 const mockedApplyAgentLaunchEnv = vi.mocked(launchModule.applyAgentLaunchEnv);
@@ -45,7 +52,7 @@ test('detectAgents isolates a single agent probe throw so the picker still lists
     return originalResolveImpl(def, env);
   });
 
-  const agents = await detectAgents();
+  const agents = await detectAgents({}, AGENT_DEFS);
 
   // Every adapter from the registry must still appear, including the
   // one whose probe blew up — it just gets surfaced as unavailable so
@@ -81,7 +88,7 @@ test('detectAgents isolates a probe throw from applyAgentLaunchEnv just like res
     return originalApplyImpl(env, launch, nodeBinDir);
   });
 
-  const agents = await detectAgents();
+  const agents = await detectAgents({}, AGENT_DEFS);
 
   expect(agents.length).toBe(AGENT_DEFS.length);
   // At least one adapter is marked unavailable because of the throw;

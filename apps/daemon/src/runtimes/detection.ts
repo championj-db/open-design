@@ -875,17 +875,20 @@ function rememberDetectedLiveModels(
   rememberLiveModels(agent.id, agent.models, scope);
 }
 
+// `defs` defaults to the registry; tests pass the full def catalog to keep
+// exercising the unregistered CLI defs' probes (see `runtimes/registry.ts`).
 export async function detectAgents(
   configuredEnvByAgent: Record<string, Record<string, string>> = {},
+  defs: RuntimeAgentDef[] = AGENT_DEFS,
 ) {
   const results = await Promise.all(
-    AGENT_DEFS.map((def) => detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id))),
+    defs.map((def) => detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id))),
   );
   // Refresh the validation cache from whatever we just surfaced to the UI
   // so /api/chat can accept any model the user could have just picked,
   // including ones that only showed up after a CLI re-auth.
   for (const [index, agent] of results.entries()) {
-    const def = AGENT_DEFS[index];
+    const def = defs[index];
     if (!def) continue;
     rememberDetectedLiveModels(def, configuredEnvForAgent(configuredEnvByAgent, def.id), agent);
   }
@@ -900,8 +903,9 @@ export async function detectAgents(
 // that don't care about incremental delivery (cache warm, analytics, chat).
 export async function* detectAgentsStream(
   configuredEnvByAgent: Record<string, Record<string, string>> = {},
+  defs: RuntimeAgentDef[] = AGENT_DEFS,
 ): AsyncGenerator<DetectedAgent> {
-  const tagged = AGENT_DEFS.map((def, index) =>
+  const tagged = defs.map((def, index) =>
     detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id)).then((agent) => {
       rememberDetectedLiveModels(def, configuredEnvForAgent(configuredEnvByAgent, def.id), agent);
       return { index, agent };

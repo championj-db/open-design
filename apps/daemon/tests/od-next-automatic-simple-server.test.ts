@@ -110,6 +110,10 @@ import {
   resolveBundledOdNextRuntimeCapability,
 } from '../src/runtimes/od-next-capability-gate.js';
 
+// The suite drives runs through the legacy CLI fakes; see the helper.
+vi.mock('../src/runtimes/registry.js', async (importOriginal) =>
+  (await import('./helpers/legacy-cli-registry.js')).legacyCliRegistryMock(importOriginal as never));
+
 type StartedServer = {
   url: string;
   server: Server;

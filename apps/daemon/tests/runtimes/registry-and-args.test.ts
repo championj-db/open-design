@@ -43,7 +43,7 @@ test('local agent profiles inherit a base adapter and can pin the default model'
       );
       process.env.OD_AGENT_PROFILES_CONFIG = config;
 
-      const profiles = readLocalAgentProfileDefs();
+      const profiles = readLocalAgentProfileDefs(AGENT_DEFS);
       assert.equal(profiles.length, 1);
       const [profile] = profiles;
       assert.ok(profile);
@@ -94,7 +94,7 @@ test('local agent profiles skip explicit unknown baseAgent without falling back'
       );
       process.env.OD_AGENT_PROFILES_CONFIG = config;
 
-      const profiles = readLocalAgentProfileDefs();
+      const profiles = readLocalAgentProfileDefs(AGENT_DEFS);
 
       assert.deepEqual(profiles.map((profile) => profile.id), ['ok-wrapper']);
       assert.equal(profiles[0]?.bin, 'ok-wrapper');
@@ -119,10 +119,10 @@ test('sandbox mode ignores implicit and host explicit local agent profiles', asy
       process.env.OD_SANDBOX_MODE = '1';
       delete process.env.OD_DATA_DIR;
       delete process.env.OD_AGENT_PROFILES_CONFIG;
-      assert.deepEqual(readLocalAgentProfileDefs(), []);
+      assert.deepEqual(readLocalAgentProfileDefs(AGENT_DEFS), []);
 
       process.env.OD_AGENT_PROFILES_CONFIG = config;
-      assert.deepEqual(readLocalAgentProfileDefs(), []);
+      assert.deepEqual(readLocalAgentProfileDefs(AGENT_DEFS), []);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
