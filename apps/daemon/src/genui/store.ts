@@ -8,13 +8,13 @@
 // `genui_surfaces` from anywhere else — the F8 invariant relies on a single
 // writer.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   GenUISurfaceSpec,
 } from '@open-design/contracts';
 import { randomUUID } from 'node:crypto';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type SurfaceStatus = 'pending' | 'resolved' | 'timeout' | 'invalidated';
 export type SurfaceTier = 'run' | 'conversation' | 'project';

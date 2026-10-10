@@ -14,10 +14,10 @@
 
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { getInstalledPlugin } from './registry.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface AtomBodyEntry {
   atomId: string;

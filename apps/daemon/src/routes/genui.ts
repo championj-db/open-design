@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import { applyDiffReviewDecisionToCwd, getSnapshot, isDiffReviewSurfaceId, listIterationsForRun } from '../plugins/index.js';
 import { getProject } from '../db.js';
@@ -15,7 +15,7 @@ import { resolveProjectDir } from '../projects.js';
 import type { AuthorizeProjectRequest } from '../collab/project-request-authority.js';
 
 export interface RegisterGenuiRoutesDeps {
-  db: Database.Database;
+  db: SqlDatabase;
   design: {
     runs: {
       get(runId: string): { projectId?: string | null } | undefined;

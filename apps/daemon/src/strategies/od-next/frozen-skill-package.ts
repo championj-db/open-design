@@ -11,7 +11,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 import { parseFrontmatter } from '../../design-systems/frontmatter.js';
 import {
@@ -21,7 +21,7 @@ import {
   type SkillInfo,
 } from '../../skills.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export const OD_NEXT_FROZEN_SKILL_PACKAGE_SCHEMA =
   'open-design.od-next-frozen-skill-package/v1' as const;
@@ -293,10 +293,10 @@ function createFrozenSkillPackage(
 export function migrateFrozenSkillPackageStore(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS strategy_task_frozen_skill_packages (
-      task_execution_id TEXT PRIMARY KEY,
-      schema TEXT NOT NULL,
-      identity TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
+      task_execution_id TEXT COLLATE "C" PRIMARY KEY,
+      schema TEXT COLLATE "C" NOT NULL,
+      identity TEXT COLLATE "C" NOT NULL,
+      payload_json TEXT COLLATE "C" NOT NULL,
       FOREIGN KEY(task_execution_id) REFERENCES strategy_task_executions(task_execution_id)
         ON DELETE CASCADE
     );

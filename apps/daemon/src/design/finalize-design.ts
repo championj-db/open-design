@@ -24,7 +24,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import * as path from 'node:path';
-import Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   FinalizeAnthropicRequest,
   FinalizeAnthropicResponse,
@@ -122,7 +122,7 @@ export class FinalizeUpstreamError extends Error {
   }
 }
 
-type Db = Database.Database;
+type Db = SqlDatabase;
 
 interface ResolvedArtifact {
   name: string;

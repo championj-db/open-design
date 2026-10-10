@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 import { runFilesWrittenForRun, type RunSideEffectLedger } from '../../runtimes/run-lifecycle-analytics.js';
 import { getStrategyTaskExecutionByRunId, InvalidStrategyTaskRecordError } from '../task-store.js';
@@ -29,7 +29,7 @@ export function strategyRunWriteEvidence(run: EvidenceRun): {
 }
 
 /** Uses the same ledger and terminal outcome as the real run lifecycle callbacks. */
-export function createStrategyRunWriteEvidenceRecorder(db: Database.Database) {
+export function createStrategyRunWriteEvidenceRecorder(db: SqlDatabase) {
   const lastToolCount = new WeakMap<EvidenceRun, number>();
   const taskForRun = (runId: string) => {
     try { return getStrategyTaskExecutionByRunId(db, runId); }

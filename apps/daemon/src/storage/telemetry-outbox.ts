@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from './local-sqlite.js';
 
 export type OutboxKind = 'object' | 'feedback';
 export interface OutboxJob {
@@ -9,9 +9,9 @@ export type DeliveryAttempt = { status: 'materialized' | 'uploaded' | 'accepted'
 
 /** Additive, bounded evidence storage. Product tables and live files are never mutated. */
 export class TelemetryOutbox {
-  private readonly db: Database.Database;
+  private readonly db: LocalSqliteDatabase;
   constructor(filename: string, readonly budget = { bytes: 512 * 1024 * 1024, jobs: 10_000, attempts: 8, ttlMs: 7 * 24 * 3600_000 }) {
-    this.db = new Database(filename);
+    this.db = new LocalSqliteDatabase(filename);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 1000');
     this.db.exec(`

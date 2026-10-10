@@ -9,7 +9,7 @@ import {
   StrategyRuntimeStateV2Schema,
   composeOdNextStrategyContinuationV2,
 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 import { getSnapshot } from '../../plugins/snapshots.js';
 import { countRenderableQuestionForms, scanQuestionForms } from '../../question-form-detect.js';
@@ -32,7 +32,7 @@ import {
   type OdNextIntakePreflightInput,
 } from './resolver.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type OdNextCoordinatorReasonCode =
   | 'od_next_route_already_locked'

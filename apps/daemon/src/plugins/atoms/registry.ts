@@ -21,7 +21,7 @@
 //     iteration when no atom contradicts them — matches v1 stub
 //     behaviour for backwards compatibility.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 import type {
   AppliedPluginSnapshot,
   PipelineStage,
@@ -32,7 +32,7 @@ import {
   type RunEventForAnalyticsObservability,
 } from '../../run-analytics-observability.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface AtomWorkerContext {
   db:             SqliteDb;

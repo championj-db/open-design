@@ -9,13 +9,13 @@
 import type { Dirent } from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { SqlDatabase } from "./storage/postgres/sql-database.js";
 import { parseFrontmatter } from "./design-systems/frontmatter.js";
 import type { SkillCritiquePolicy } from "./critique/rollout.js";
 import { skillCwdAliasSegment, SKILLS_CWD_ALIAS } from "./cwd-aliases.js";
 import { getWorkspaceResourceByResourceId } from "./db.js";
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 // Persisted skill ids on existing projects can outlive a folder rename.
 // listSkills() derives the id from the SKILL.md frontmatter `name`, so once

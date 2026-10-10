@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 import { consumeStrategyExecutionIntentResolution, getStrategyTaskExecution, type StrategyTaskExecutionRecord } from '../task-store.js';
 import { finalizeStrategyPlanningResult } from './coordinator.js';
@@ -8,7 +8,7 @@ type ResolvedIntent = ReturnType<typeof validateStrategyIntentResolutionReply>;
 
 /** Reply capture precedes this transaction; the consume and business verdict are atomic. */
 export function consumeIntentResolutionWithVerdict<T>(
-  db: Database.Database,
+  db: SqlDatabase,
   taskExecutionId: string,
   resolution: ResolvedIntent,
   verdict: (consumed: StrategyTaskExecutionRecord) => T,
@@ -28,7 +28,7 @@ export function consumeIntentResolutionWithVerdict<T>(
 
 /** Shared live/startup completion. It has no physical-run creation or provider dependency. */
 export function completePlanningIntentResolution(
-  db: Database.Database,
+  db: SqlDatabase,
   taskExecutionId: string,
   resolution: ResolvedIntent,
   updatedAt?: number,

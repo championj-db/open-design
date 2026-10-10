@@ -1,7 +1,7 @@
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import * as path from 'node:path';
 import type { Request, Response } from 'express';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { getCritiqueRun } from './persistence.js';
 import { mimeForExtension } from './artifact-writer.js';
 
@@ -39,7 +39,7 @@ const DEFAULT_RESPONSE_SIZE_CAP_BYTES = 4 * 1024 * 1024;
  * @see specs/current/critique-theater.md § rerun endpoint (Task 6.2)
  */
 export function handleCritiqueArtifact(
-  db: Database.Database,
+  db: SqlDatabase,
   options: { artifactsRoot: string; responseCapBytes?: number },
 ): (req: Request, res: Response) => Promise<void> {
   const artifactsRoot = path.resolve(options.artifactsRoot);

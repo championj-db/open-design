@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   ProjectMetadata,
   ProjectScenarioBinding,
@@ -7,7 +7,7 @@ import type {
 } from '@open-design/contracts';
 import { defaultScenarioTaskProfileForProjectMetadata } from '@open-design/contracts';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 interface ProjectBindingRow {
   id: string;

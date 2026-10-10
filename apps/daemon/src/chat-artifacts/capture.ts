@@ -11,7 +11,7 @@
 // turn fails. It never falls back to "whatever is at that path now". A failed
 // snapshot is an honest gap; a substituted one is fabricated history.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -34,7 +34,7 @@ import {
 import type { ChatArtifactFailureCode } from './types.js';
 
 export interface ChatArtifactCaptureDeps {
-  db: Database.Database;
+  db: SqlDatabase;
   blobs: ChatArtifactBlobStore;
   quota?: ChatArtifactQuota;
   now?: () => number;

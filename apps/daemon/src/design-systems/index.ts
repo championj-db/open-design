@@ -13,7 +13,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import {
   type ComponentsManifest,
@@ -32,7 +32,7 @@ import {
 } from '../db.js';
 import { teamResourceWorkspaceRoot } from '../collab/team-resource-materialization.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type DesignSystemSurface = 'web' | 'image' | 'video' | 'audio';
 export type DesignSystemSource = 'built-in' | 'installed' | 'user';

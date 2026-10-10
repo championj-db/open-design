@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './postgres/sql-database.js';
 
 import {
   runVelaCommand,
@@ -70,35 +70,29 @@ export function isBillingTerminalAmrRun(
     && run.errorCode !== 'AMR_INSUFFICIENT_BALANCE';
 }
 
-function hasColumn(db: Database.Database, name: string): boolean {
-  return (db.prepare('PRAGMA table_info(amr_terminal_report_outbox)').all() as Array<{ name: string }>)
-    .some((column) => column.name === name);
-}
-
 /** Upgrade both fresh databases and the three-column table shipped by #7392. */
-export function migrateAmrTerminalReportOutbox(db: Database.Database): void {
+export function migrateAmrTerminalReportOutbox(db: SqlDatabase): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS amr_terminal_report_outbox (
-      run_id TEXT PRIMARY KEY,
-      outcome TEXT NOT NULL CHECK (outcome IN ('failed', 'canceled')),
-      terminal_at INTEGER NOT NULL
+      run_id TEXT COLLATE "C" PRIMARY KEY,
+      outcome TEXT COLLATE "C" NOT NULL CHECK (outcome IN ('failed', 'canceled')),
+      terminal_at BIGINT NOT NULL
     );
   `);
-  const additions: Array<[string, string]> = [
-    ['terminal_at_iso', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN terminal_at_iso TEXT'],
-    ['state', "ALTER TABLE amr_terminal_report_outbox ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'"],
-    ['attempt_count', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0'],
-    ['next_attempt_at', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0'],
-    ['version', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN version INTEGER NOT NULL DEFAULT 0'],
-    ['lease_until', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN lease_until INTEGER'],
-    ['last_error_code', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN last_error_code TEXT'],
-    ['last_error', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN last_error TEXT'],
-    ['receipt', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN receipt TEXT'],
-    ['created_at', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0'],
-    ['updated_at', 'ALTER TABLE amr_terminal_report_outbox ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0'],
-  ];
-  for (const [name, statement] of additions) {
-    if (!hasColumn(db, name)) db.exec(statement);
+  for (const statement of [
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS terminal_at_iso TEXT COLLATE "C"`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS state TEXT COLLATE "C" NOT NULL DEFAULT 'pending'`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS attempt_count BIGINT NOT NULL DEFAULT 0`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS next_attempt_at BIGINT NOT NULL DEFAULT 0`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS lease_until BIGINT`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS last_error_code TEXT COLLATE "C"`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS last_error TEXT COLLATE "C"`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS receipt TEXT COLLATE "C"`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0`,
+    `ALTER TABLE amr_terminal_report_outbox ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0`,
+  ]) {
+    db.exec(statement);
   }
   const missingIso = db.prepare(`
     SELECT run_id AS runId, terminal_at AS terminalAt
@@ -119,9 +113,9 @@ export function migrateAmrTerminalReportOutbox(db: Database.Database): void {
   transaction();
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_amr_terminal_report_outbox_due
-      ON amr_terminal_report_outbox(state, next_attempt_at, lease_until, run_id);
+      ON amr_terminal_report_outbox(state NULLS FIRST, next_attempt_at NULLS FIRST, lease_until NULLS FIRST, run_id NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_amr_terminal_report_outbox_terminal_at
-      ON amr_terminal_report_outbox(terminal_at, run_id);
+      ON amr_terminal_report_outbox(terminal_at NULLS FIRST, run_id NULLS FIRST);
   `);
 }
 
@@ -155,7 +149,7 @@ function safeEvidence(value: string, limit: number): string {
 }
 
 export function createAmrTerminalReportOutboxStore(
-  db: Database.Database,
+  db: SqlDatabase,
   now: () => number = Date.now,
 ): AmrTerminalReportOutboxStore {
   const enqueueRow = db.prepare(`

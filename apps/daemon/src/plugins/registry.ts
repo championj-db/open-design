@@ -34,9 +34,9 @@ import type {
 import { defaultTrustForRecord, resolveCapabilitiesGranted } from './trust.js';
 import { isInternalBundledStrategyV2 } from './strategy-provenance.js';
 import { getWorkspaceResourceByResourceId } from '../db.js';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type DbRow = Record<string, unknown>;
 
 export interface RegistryRoots {

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import {
   ensureTeamProjectCommentConversations,
@@ -19,7 +19,7 @@ import type { AuthorizedTeamProjectPullReceipt } from './authorized-team-project
 import type { ResourceHubPrincipal } from './resource-principal.js';
 import { isUnmaterializedSharedPlaceholder } from './shared-project-placeholder.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface MaterializePulledTeamMirrorResult {
   localRecordChanged: boolean;

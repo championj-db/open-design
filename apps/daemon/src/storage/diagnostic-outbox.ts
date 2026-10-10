@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from './local-sqlite.js';
 
 export interface DiagnosticIncident {
   id: string; sourceId: string; createdAt: number; state: 'collect' | 'pending' | 'delivered' | 'discarded';
@@ -16,12 +16,12 @@ export const QUEUE_MAX_BYTES = 1024 ** 3;
 /** A separate database avoids coupling fault delivery to the application's billing/state DB. */
 export class DiagnosticOutbox {
   readonly directory: string;
-  private readonly db: Database.Database;
+  private readonly db: LocalSqliteDatabase;
   constructor(dataRoot: string) {
     this.directory = join(dataRoot, 'diagnostics');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     const file = join(this.directory, 'outbox.sqlite');
-    this.db = new Database(file);
+    this.db = new LocalSqliteDatabase(file);
     chmodSync(file, 0o600);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = FULL');

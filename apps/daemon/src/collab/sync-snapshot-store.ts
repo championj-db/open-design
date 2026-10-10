@@ -10,21 +10,21 @@
 // the resolved runtime data root — this module never resolves a data path of
 // its own (see the Daemon data directory contract in AGENTS.md).
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { CollabCloudMemberDirectoryEntry, TeamProject } from '@open-design/contracts';
 import type { SyncDigestFace } from './sync-digest.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export function migrateCollabSyncSnapshots(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS collab_sync_snapshots (
-      face TEXT NOT NULL,
-      account_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      digest_token TEXT NOT NULL,
-      snapshot_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
+      face TEXT COLLATE "C" NOT NULL,
+      account_id TEXT COLLATE "C" NOT NULL,
+      workspace_id TEXT COLLATE "C" NOT NULL,
+      digest_token TEXT COLLATE "C" NOT NULL,
+      snapshot_json TEXT COLLATE "C" NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (face, account_id, workspace_id)
     );
   `);

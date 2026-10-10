@@ -1,7 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from './storage/local-sqlite.js';
 
 function isOwnedAndPrivate(stat: Stats): boolean {
   return !stat.isSymbolicLink()
@@ -29,9 +29,9 @@ export async function findIndexedCodexArchivedRolloutPath(
   ]);
   if (!rootStat?.isDirectory() || !isOwnedAndPrivate(rootStat)
     || !dbStat?.isFile() || !isOwnedAndPrivate(dbStat)) return null;
-  let db: Database.Database | undefined;
+  let db: LocalSqliteDatabase | undefined;
   try {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 25 });
+    db = new LocalSqliteDatabase(dbPath, { readonly: true, fileMustExist: true, timeout: 25 });
     // Requiring the native primary-key index also prevents an incompatible
     // schema from turning this lookup into a scan of unrelated thread rows.
     const row = db.prepare(`SELECT rollout_path FROM threads

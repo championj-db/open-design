@@ -31,7 +31,7 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import { kindForArtifactPath, mimeForArtifactPath } from '../chat-artifacts/mime.js';
 
@@ -124,7 +124,7 @@ async function describeTouchedFile(
  * Never throws: a missed association costs one card, it must not fail the run.
  */
 export async function associateRunProducedFiles(
-  db: Database.Database,
+  db: SqlDatabase,
   input: AssociateRunProducedFilesInput,
 ): Promise<AssociateRunProducedFilesOutcome> {
   if (input.touchedPaths.length === 0) return { written: false, reason: 'no-paths' };
@@ -229,7 +229,7 @@ interface LateAssociationTarget {
  * Never throws: a missed association costs one card, it must not fail the task.
  */
 export async function associateLateRunProducedFile(
-  db: Database.Database,
+  db: SqlDatabase,
   input: AssociateLateRunProducedFileInput,
 ): Promise<AssociateLateRunProducedFileOutcome> {
   const readTarget = () =>

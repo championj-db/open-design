@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './storage/postgres/sql-database.js';
 import type { AgentSessionInvalidationReason } from '@open-design/contracts';
 
 import {
@@ -15,7 +15,7 @@ import {
 } from './prompts/stable-sections.js';
 import { scanRunEventsForUsageAnalytics } from './run-analytics-observability.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type ResumeInvalidationReason = AgentSessionInvalidationReason;
 

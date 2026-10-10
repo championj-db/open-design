@@ -3487,7 +3487,7 @@ export async function startServer({
     previousLogPath: resolveDaemonPreviousLogPath(runtime),
   });
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
-  daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
+  daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);
   const amrTerminalReportDelivery = createAmrTerminalReportDeliveryService({
     store: amrTerminalReportOutbox,

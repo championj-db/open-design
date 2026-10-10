@@ -4,7 +4,7 @@
 // Exceeding a budget fails THAT capture, never the turn — the message still
 // completes and the card honestly reports "history was not saved".
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 export interface ChatArtifactQuota {
   /** Largest single original blob. */
@@ -67,7 +67,7 @@ export function resolveChatArtifactQuota(
  * makes a GC delete something a message still points at.
  */
 export function projectSnapshotBytes(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
 ): number {
   const row = db
@@ -89,7 +89,7 @@ export function projectSnapshotBytes(
 }
 
 /** Total installed blob bytes recorded in the index. */
-export function totalSnapshotBytes(db: Database.Database): number {
+export function totalSnapshotBytes(db: SqlDatabase): number {
   const row = db
     .prepare(`SELECT COALESCE(SUM(byte_size), 0) AS total FROM chat_artifact_blobs`)
     .get() as { total: number } | undefined;

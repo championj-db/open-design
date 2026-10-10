@@ -23,7 +23,7 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   deleteInstalledPlugin,
   getInstalledPlugin,
@@ -34,7 +34,7 @@ import {
 import type { InstalledPluginRecord, MarketplaceTrust } from '@open-design/contracts';
 import { inspectBundledStrategyProvenanceV2 } from './strategy-provenance.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface RegisterBundledPluginsInput {
   db: SqliteDb;

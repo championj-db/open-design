@@ -55,7 +55,7 @@
 import fs from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import type { SqlDatabase } from './storage/postgres/sql-database.js';
 import { listMessages } from './db.js';
 import { projectDir } from './projects.js';
 
@@ -94,7 +94,7 @@ type PersistedAgentEvent =
   | { kind: 'usage'; inputTokens?: number; outputTokens?: number; costUsd?: number; durationMs?: number }
   | { kind: 'raw'; line: string };
 
-type Db = Database.Database;
+type Db = SqlDatabase;
 
 interface ConversationRow {
   id: string;

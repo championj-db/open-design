@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   getCritiqueRun,
   markRunInterruptedRecovery,
@@ -29,7 +29,7 @@ const HTTP_ACCEPTED = 202;
  * @see specs/current/critique-theater.md § interrupt endpoint (Task 6.1)
  */
 export function handleCritiqueInterrupt(
-  db: Database.Database,
+  db: SqlDatabase,
   registry: RunRegistry,
 ): (req: Request, res: Response) => void {
   return function critiqueInterruptHandler(req: Request, res: Response): void {

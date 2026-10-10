@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import { getWorkspaceResourceByResourceId } from '../db.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 const WORKSPACE_TEAM_SKILL_BINDING_PREFIX = 'team-mirror:';
 

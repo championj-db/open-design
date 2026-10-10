@@ -16,13 +16,13 @@
 
 import { manifestSourceDigest, resolveContext, validateSafe, type RegistryView } from '@open-design/plugin-runtime';
 import type { InstalledPluginRecord, PluginManifest } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { findAtom, isImplementedAtom, isKnownAtom } from './atoms.js';
 import { validateConnectorRefs, type ConnectorProbe } from './connector-gate.js';
 import { isParseableUntil } from './until.js';
 import { listSnapshotsForProject, markSnapshotStale } from './snapshots.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
 

@@ -19,12 +19,12 @@
 
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { AppliedPluginSnapshot } from '@open-design/contracts';
 import { getInstalledPlugin } from './registry.js';
 import { getSnapshot } from './snapshots.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type ExportTarget = 'od' | 'claude-plugin' | 'agent-skill';
 

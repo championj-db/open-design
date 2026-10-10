@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   buildRunFinishedV4Aliases,
   type TrackingRunCancelOrigin,
@@ -147,7 +147,7 @@ interface ReconciliationOptions {
   analytics: AnalyticsLike;
   appVersion?: string;
   appVersionInfo?: unknown;
-  db: Database.Database;
+  db: SqlDatabase;
   reportLangfuse(args: Record<string, unknown>): unknown | Promise<unknown>;
   taskObservationModeForRun?: (runId: string) => 'off' | 'observe' | 'send';
   taskObservationRepresentationForRun?: (runId: string) =>
@@ -296,7 +296,7 @@ function hydrateRun(state: DurableRunState, events: ReturnType<typeof readEvents
 }
 
 function reconcileMessages(
-  db: Database.Database,
+  db: SqlDatabase,
   statesByRunId: Map<string, DurableRunState>,
   now: number,
   deferredRunIds: ReadonlySet<string>,

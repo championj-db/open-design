@@ -20,7 +20,7 @@
 // run start; all snapshot wiring goes through here so the behavior stays
 // deterministic across CLI / desktop / web.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   AppliedPluginSnapshot,
   AppliedStrategyBindingV2,
@@ -59,7 +59,7 @@ import {
 import { InvalidBundledStrategyActivationV2Error } from './strategy-provenance.js';
 import { writeProjectScenarioBinding } from './scenario-binding.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface ResolveSnapshotInput {
   db: SqliteDb;

@@ -15,7 +15,7 @@ import {
   type SafeDeliverableSyntaxTelemetryV1,
   type StrategyInputStageV2,
 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { EvalContextV2 } from './eval-context.js';
 
 import type { TelemetryPrefs } from '../app-config.js';
@@ -702,7 +702,7 @@ export function aggregateStrategyTaskObservations(input: {
 }
 
 export function aggregateStoredStrategyTaskObservations(input: {
-  db: Database.Database;
+  db: SqlDatabase;
   taskExecutionId: string;
   observations: readonly unknown[];
 }): StrategyTaskObservationAggregateV1 {

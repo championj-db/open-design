@@ -20,7 +20,7 @@
  *   starts from rescanning. Dying mid-way is safe — each row is either as it
  *   was or fully healed, and the next start resumes.
  */
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './postgres/sql-database.js';
 
 import {
   hasCompletedDaemonMaintenancePass,
@@ -57,7 +57,7 @@ export interface MessageEventPayloadHealReport {
 }
 
 export interface MessageEventPayloadHealOptions {
-  db: Database.Database;
+  db: SqlDatabase;
   /** Rescan even when a completed pass is on record (tests, diagnostics). */
   ignoreCompletionMarker?: boolean;
   /** Checked between rows; returning true ends the pass early (incomplete). */
@@ -194,7 +194,7 @@ export interface MessageEventPayloadHealHandle {
 
 /** Start one background pass. Failures are logged, never thrown. */
 export function startMessageEventPayloadHeal(options: {
-  db: Database.Database;
+  db: SqlDatabase;
   logger?: (message: string) => void;
 }): MessageEventPayloadHealHandle {
   let stopRequested = false;

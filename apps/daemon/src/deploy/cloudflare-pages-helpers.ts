@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   aggregateCloudflarePagesStatus,
   checkDeploymentUrl,
@@ -47,7 +47,7 @@ function cloudflarePagesProjectNameFromUrl(rawUrl: unknown): string {
 }
 
 export function cloudflarePagesProjectNameForDeploy(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
   projectName: string,
   prior: DeploymentLike | null | undefined,

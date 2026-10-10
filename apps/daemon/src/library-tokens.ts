@@ -7,7 +7,7 @@
 // allowlist the `/api` origin middleware consults. The allowlist is seeded
 // from SQLite on daemon boot so a paired extension survives restarts.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './storage/postgres/sql-database.js';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { LibraryConnectionStatus } from '@open-design/contracts';
 import {
@@ -18,7 +18,7 @@ import {
   type LibraryTokenRow,
 } from './library-store.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 const PAIRING_TTL_MS = 5 * 60 * 1000;
 

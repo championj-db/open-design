@@ -9147,19 +9147,20 @@ async function runDaemonDb(rest, flags) {
   od daemon db vacuum [--json] [--daemon-url <url>]
 
 status:
-  Prints a structured inventory of the daemon's SQLite backend:
-    - file path (under .od/ by default; OD_DATA_DIR overrides)
-    - size on disk (primary + WAL + SHM)
-    - schema version (user_version PRAGMA)
+  Prints a structured inventory of the daemon's Postgres schema:
+    - connection (host:port/database as user; no secrets)
+    - size on disk (tables + indexes + TOAST)
+    - schema version (applied migration count)
     - per-table row counts (system tables excluded)
 
 verify:
-  Runs SQLite PRAGMA integrity_check (or quick_check with --quick)
-  + foreign_key_check, returns a structured issues[] report.
+  Checks the connection answers and that no foreign-key / check
+  constraint in the daemon schema is NOT VALID (--quick is accepted
+  for compatibility), returns a structured issues[] report.
   Exit 0 when ok=true, 4 when any issue is found.
 
 vacuum:
-  Runs SQLite VACUUM to reclaim space after large delete batches
+  Runs Postgres VACUUM to reclaim space after large delete batches
   (snapshot prune, plugin uninstall, etc.). Reports before/after
   sizes + elapsed ms.`);
     process.exit(sub ? 0 : 2);

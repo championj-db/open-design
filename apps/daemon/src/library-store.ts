@@ -9,7 +9,7 @@
 // This module is pure persistence — no filesystem writes, no hashing, no HTTP.
 // Higher-level orchestration (storage, enrichment) lives in `library.ts`.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './storage/postgres/sql-database.js';
 import { randomUUID } from 'node:crypto';
 import type {
   LibraryAsset,
@@ -23,101 +23,101 @@ import type {
   LibraryTaskStatus,
 } from '@open-design/contracts';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export function migrateLibrary(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS library_assets (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      storage TEXT NOT NULL DEFAULT 'owned',
-      source_url TEXT,
-      source_title TEXT,
-      source_domain TEXT,
-      captured_at INTEGER NOT NULL,
-      archived_date TEXT NOT NULL,
-      file_path TEXT,
-      origin_project_id TEXT,
-      rel_path TEXT,
-      mime TEXT,
-      width INTEGER,
-      height INTEGER,
-      size INTEGER,
-      content_hash TEXT NOT NULL,
-      caption TEXT,
-      ocr_text TEXT,
-      palette_json TEXT,
-      tags_json TEXT,
-      metadata_json TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      kind TEXT COLLATE "C" NOT NULL,
+      storage TEXT COLLATE "C" NOT NULL DEFAULT 'owned',
+      source_url TEXT COLLATE "C",
+      source_title TEXT COLLATE "C",
+      source_domain TEXT COLLATE "C",
+      captured_at BIGINT NOT NULL,
+      archived_date TEXT COLLATE "C" NOT NULL,
+      file_path TEXT COLLATE "C",
+      origin_project_id TEXT COLLATE "C",
+      rel_path TEXT COLLATE "C",
+      mime TEXT COLLATE "C",
+      width BIGINT,
+      height BIGINT,
+      size BIGINT,
+      content_hash TEXT COLLATE "C" NOT NULL,
+      caption TEXT COLLATE "C",
+      ocr_text TEXT COLLATE "C",
+      palette_json TEXT COLLATE "C",
+      tags_json TEXT COLLATE "C",
+      metadata_json TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       UNIQUE(content_hash)
     );
     CREATE INDEX IF NOT EXISTS idx_library_assets_archived
-      ON library_assets(archived_date DESC, created_at DESC);
+      ON library_assets(archived_date DESC NULLS LAST, created_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_library_assets_kind
-      ON library_assets(kind, created_at DESC);
+      ON library_assets(kind NULLS FIRST, created_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_library_assets_domain
-      ON library_assets(source_domain);
+      ON library_assets(source_domain NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_library_assets_origin
-      ON library_assets(origin_project_id);
+      ON library_assets(origin_project_id NULLS FIRST);
 
     CREATE TABLE IF NOT EXISTS library_asset_sources (
-      id TEXT PRIMARY KEY,
-      asset_id TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      project_id TEXT,
-      conversation_id TEXT,
-      run_id TEXT,
-      design_system_id TEXT,
-      rel_path TEXT,
-      created_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      asset_id TEXT COLLATE "C" NOT NULL,
+      source_kind TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C",
+      conversation_id TEXT COLLATE "C",
+      run_id TEXT COLLATE "C",
+      design_system_id TEXT COLLATE "C",
+      rel_path TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
       FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_library_sources_asset
-      ON library_asset_sources(asset_id);
+      ON library_asset_sources(asset_id NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_library_sources_project
-      ON library_asset_sources(project_id);
+      ON library_asset_sources(project_id NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_library_sources_ds
-      ON library_asset_sources(design_system_id);
+      ON library_asset_sources(design_system_id NULLS FIRST);
 
     CREATE TABLE IF NOT EXISTS library_embeddings (
-      asset_id TEXT PRIMARY KEY,
-      model TEXT NOT NULL,
-      dim INTEGER NOT NULL,
-      vector BLOB NOT NULL,
-      indexed_text TEXT,
-      created_at INTEGER NOT NULL,
+      asset_id TEXT COLLATE "C" PRIMARY KEY,
+      model TEXT COLLATE "C" NOT NULL,
+      dim BIGINT NOT NULL,
+      vector BYTEA NOT NULL,
+      indexed_text TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
       FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS library_tasks (
-      id TEXT PRIMARY KEY,
-      asset_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'queued',
-      progress_json TEXT NOT NULL DEFAULT '[]',
-      error_json TEXT,
-      started_at INTEGER NOT NULL,
-      ended_at INTEGER,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      asset_id TEXT COLLATE "C" NOT NULL,
+      status TEXT COLLATE "C" NOT NULL DEFAULT 'queued',
+      progress_json TEXT COLLATE "C" NOT NULL DEFAULT '[]',
+      error_json TEXT COLLATE "C",
+      started_at BIGINT NOT NULL,
+      ended_at BIGINT,
       FOREIGN KEY(asset_id) REFERENCES library_assets(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_library_tasks_asset
-      ON library_tasks(asset_id);
+      ON library_tasks(asset_id NULLS FIRST);
 
     CREATE TABLE IF NOT EXISTS library_tokens (
-      token_hash TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      extension_origin TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      last_used_at INTEGER NOT NULL
+      token_hash TEXT COLLATE "C" PRIMARY KEY,
+      label TEXT COLLATE "C" NOT NULL,
+      extension_origin TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      last_used_at BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS library_digests (
-      date TEXT PRIMARY KEY,
-      project_id TEXT,
-      artifact_path TEXT,
-      summary TEXT,
-      created_at INTEGER NOT NULL
+      date TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C",
+      artifact_path TEXT COLLATE "C",
+      summary TEXT COLLATE "C",
+      created_at BIGINT NOT NULL
     );
   `);
 }
@@ -622,8 +622,13 @@ export interface LibraryTokenRow {
 
 export function insertLibraryToken(db: SqliteDb, row: LibraryTokenRow): void {
   db.prepare(
-    `INSERT OR REPLACE INTO library_tokens (token_hash, label, extension_origin, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO library_tokens (token_hash, label, extension_origin, created_at, last_used_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (token_hash) DO UPDATE SET
+       label = excluded.label,
+       extension_origin = excluded.extension_origin,
+       created_at = excluded.created_at,
+       last_used_at = excluded.last_used_at`,
   ).run(row.tokenHash, row.label, row.extensionOrigin, row.createdAt, row.lastUsedAt);
 }
 

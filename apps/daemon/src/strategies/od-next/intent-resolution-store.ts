@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 export type StrategyWriteEvidenceSource = 'filesystem' | 'tool_stream' | 'unknown';
 const WRITE_EVIDENCE_SOURCES = { filesystem: 1, tool_stream: 2, unknown: 4 } as const;
 export type IntentResolutionState = 'unresolved' | 'claimed' | 'started' | 'resolved' | 'failed';
@@ -23,23 +23,23 @@ export const intentResolutionDigest = (text: string): string => createHash('sha2
 export function migrateIntentResolutionStore(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS strategy_task_intent_resolution (
-      task_execution_id TEXT PRIMARY KEY REFERENCES strategy_task_executions(task_execution_id) ON DELETE CASCADE,
-      version INTEGER NOT NULL CHECK(version = 1),
-      state TEXT NOT NULL CHECK(state IN ('unresolved','claimed','started','resolved','failed')),
-      attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts IN (0,1)),
-      run_id TEXT UNIQUE,
-      source_run_id TEXT,
-      source_result_json TEXT,
-      source_result_sha256 TEXT,
-      reply_json TEXT,
-      reply_sha256 TEXT
+      task_execution_id TEXT COLLATE "C" PRIMARY KEY REFERENCES strategy_task_executions(task_execution_id) ON DELETE CASCADE,
+      version BIGINT NOT NULL CHECK(version = 1),
+      state TEXT COLLATE "C" NOT NULL CHECK(state IN ('unresolved','claimed','started','resolved','failed')),
+      attempts BIGINT NOT NULL DEFAULT 0 CHECK(attempts IN (0,1)),
+      run_id TEXT COLLATE "C" UNIQUE,
+      source_run_id TEXT COLLATE "C",
+      source_result_json TEXT COLLATE "C",
+      source_result_sha256 TEXT COLLATE "C",
+      reply_json TEXT COLLATE "C",
+      reply_sha256 TEXT COLLATE "C"
     );
     CREATE TABLE IF NOT EXISTS strategy_task_run_write_evidence (
-      task_execution_id TEXT NOT NULL REFERENCES strategy_task_executions(task_execution_id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL,
-      files_written INTEGER NOT NULL CHECK(files_written >= 0),
-      unknown INTEGER NOT NULL CHECK(unknown IN (0,1)),
-      source_mask INTEGER NOT NULL CHECK(source_mask BETWEEN 1 AND 7),
+      task_execution_id TEXT COLLATE "C" NOT NULL REFERENCES strategy_task_executions(task_execution_id) ON DELETE CASCADE,
+      run_id TEXT COLLATE "C" NOT NULL,
+      files_written BIGINT NOT NULL CHECK(files_written >= 0),
+      unknown BIGINT NOT NULL CHECK(unknown IN (0,1)),
+      source_mask BIGINT NOT NULL CHECK(source_mask BETWEEN 1 AND 7),
       PRIMARY KEY(task_execution_id, run_id),
       FOREIGN KEY(run_id) REFERENCES strategy_task_runs(run_id)
     );
@@ -81,8 +81,9 @@ export function recordStrategyRunWriteEvidence(db: SqliteDb, input: {
     .get(input.taskExecutionId, input.runId)) throw conflict();
   db.prepare(`INSERT INTO strategy_task_run_write_evidence(task_execution_id, run_id, files_written, unknown, source_mask)
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_execution_id, run_id) DO UPDATE SET
-    files_written = MAX(files_written, excluded.files_written), unknown = MAX(unknown, excluded.unknown),
-    source_mask = source_mask | excluded.source_mask`)
+    files_written = GREATEST(strategy_task_run_write_evidence.files_written, excluded.files_written),
+    unknown = GREATEST(strategy_task_run_write_evidence.unknown, excluded.unknown),
+    source_mask = strategy_task_run_write_evidence.source_mask | excluded.source_mask`)
     .run(input.taskExecutionId, input.runId, input.filesWritten, input.unknown ? 1 : 0, WRITE_EVIDENCE_SOURCES[input.source]);
 }
 

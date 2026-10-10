@@ -145,7 +145,7 @@ export function validateCapabilityList(
 // and writes the deduped sorted union back. Idempotent — re-granting
 // the same set is a no-op. Returns the resulting list.
 export function grantCapabilities(args: {
-  db: import('better-sqlite3').Database;
+  db: import('../storage/postgres/sql-database.js').SqlDatabase;
   pluginId: string;
   capabilities: string[];
 }): string[] {
@@ -180,7 +180,7 @@ export function grantCapabilities(args: {
 // but subtracts. The implicit `prompt:inject` floor is preserved so a
 // trusted-by-default plugin never falls below the spec §5.3 minimum.
 export function revokeCapabilities(args: {
-  db: import('better-sqlite3').Database;
+  db: import('../storage/postgres/sql-database.js').SqlDatabase;
   pluginId: string;
   capabilities: string[];
 }): string[] {

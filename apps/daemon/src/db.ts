@@ -1,10 +1,10 @@
-// SQLite-backed persistence for projects, conversations, messages, and the
-// per-project set of open workspace tabs. The on-disk project folder under
+// PostgreSQL-backed persistence (Databricks Lakebase in production) for
+// projects, conversations, messages, and the per-project set of open
+// workspace tabs. The on-disk project folder under
 // .od/projects/<id>/ is still the single owner of the user's actual files
 // (HTML artifacts, sketches, uploads); this database tracks the metadata
 // that used to live in localStorage.
 
-import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -56,14 +56,17 @@ import {
 } from './runtimes/run-event-payload-budget.js';
 import { migrateStrategyTaskStore } from './strategies/task-store.js';
 import { observeRead } from './services/daemon-health.js';
+import { describeDaemonDbConfig, resolveDaemonDbConfigForDataDir } from './storage/daemon-db.js';
+import { runMigrations, type Migration } from './storage/postgres/migrations.js';
+import { SqlDatabase, type SqlStatement } from './storage/postgres/sql-database.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type DbRow = Record<string, any>;
 type JsonObject = Record<string, unknown>;
 type ChatSessionMode = 'design' | 'chat' | 'plan';
 
 let dbInstance: SqliteDb | null = null;
-let dbFile: string | null = null;
+let dbKey: string | null = null;
 
 function row(value: unknown): DbRow | null {
   return value && typeof value === 'object' ? value as DbRow : null;
@@ -73,18 +76,29 @@ function rows(value: unknown[]): DbRow[] {
   return value.map((item) => row(item) ?? {});
 }
 
+/**
+ * Open (or reuse) the daemon's Postgres handle and bring its schema up to
+ * date. The connection comes from env (see storage/daemon-db.ts); `dataDir`
+ * still names the daemon data root for the file-backed state and, when
+ * OD_PG_SCHEMA_PER_DATA_DIR=1, selects the schema so isolated data roots get
+ * isolated relational state too.
+ */
 export function openDatabase(projectRoot: string, { dataDir }: { dataDir?: string } = {}): SqliteDb {
   const dir = dataDir ? path.resolve(dataDir) : path.join(projectRoot, '.od');
-  const file = path.join(dir, 'app.sqlite');
-  if (dbInstance && dbFile === file) return dbInstance;
+  const config = resolveDaemonDbConfigForDataDir(dir);
+  const key = JSON.stringify(config);
+  if (dbInstance && dbKey === key) return dbInstance;
   if (dbInstance) closeDatabase();
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(file);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  migrate(db);
+  const db = new SqlDatabase({ config, name: describeDaemonDbConfig(config) });
+  try {
+    migrate(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   dbInstance = db;
-  dbFile = file;
+  dbKey = key;
   return db;
 }
 
@@ -92,59 +106,86 @@ export function closeDatabase() {
   if (!dbInstance) return;
   dbInstance.close();
   dbInstance = null;
-  dbFile = null;
+  dbKey = null;
 }
 
-function migrate(db: SqliteDb): void {
+/**
+ * Ordered schema migrations. `0001_*` ids are the baseline port of the
+ * SQLite schema; each feature store keeps owning its own DDL.
+ */
+export const DAEMON_MIGRATIONS: readonly Migration[] = [
+  { id: '0001_core', up: migrateCore },
+  { id: '0001_critique', up: (db) => migrateCritique(db) },
+  { id: '0001_media_tasks', up: (db) => migrateMediaTasks(db) },
+  { id: '0001_library', up: (db) => migrateLibrary(db) },
+  { id: '0001_plugins', up: (db) => migratePlugins(db) },
+  { id: '0001_strategy_task_store', up: (db) => migrateStrategyTaskStore(db) },
+  { id: '0001_chat_artifacts', up: (db) => migrateChatArtifacts(db) },
+  { id: '0001_collab_sync_snapshots', up: (db) => migrateCollabSyncSnapshots(db) },
+  { id: '0001_comment_relay_outbox', up: (db) => migrateCommentRelayOutbox(db) },
+  { id: '0001_amr_terminal_report_outbox', up: (db) => migrateAmrTerminalReportOutbox(db) },
+  { id: '0001_public_file_publications', up: (db) => migratePublicFilePublications(db) },
+];
+
+export function migrate(db: SqliteDb): void {
+  runMigrations(db, DAEMON_MIGRATIONS);
+  // Data repairs that are cheap no-ops once clean; they run on every open,
+  // exactly as they did on SQLite.
+  collapseDuplicateWorkspaceProjectHomes(db);
+  backfillPreviewCommentPinSeqAndSortKey(db);
+  migrateProjectScenarioBindings(db);
+}
+
+function migrateCore(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      skill_id TEXT,
-      design_system_id TEXT,
-      pending_prompt TEXT,
-      metadata_json TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      skill_id TEXT COLLATE "C",
+      design_system_id TEXT COLLATE "C",
+      pending_prompt TEXT COLLATE "C",
+      metadata_json TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
 
     -- A project belongs to exactly ONE workspace, so project_id is the key.
     -- See collab/workspace-project-home.ts for the ruling and the repair path.
     CREATE TABLE IF NOT EXISTS workspace_projects (
-      project_id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      visibility TEXT NOT NULL CHECK (visibility IN ('personal', 'team')),
-      resource_state TEXT NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
-      created_by_workspace_member_id TEXT,
-      updated_by_workspace_member_id TEXT,
-      resource_hub_resource_id TEXT,
-      cloud_tombstoned_at INTEGER,
-      sync_state TEXT,
-      metadata_refresh_pending INTEGER NOT NULL DEFAULT 0,
-      version INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      project_id TEXT COLLATE "C" PRIMARY KEY,
+      workspace_id TEXT COLLATE "C" NOT NULL,
+      visibility TEXT COLLATE "C" NOT NULL CHECK (visibility IN ('personal', 'team')),
+      resource_state TEXT COLLATE "C" NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
+      created_by_workspace_member_id TEXT COLLATE "C",
+      updated_by_workspace_member_id TEXT COLLATE "C",
+      resource_hub_resource_id TEXT COLLATE "C",
+      cloud_tombstoned_at BIGINT,
+      sync_state TEXT COLLATE "C",
+      metadata_refresh_pending BIGINT NOT NULL DEFAULT 0,
+      version BIGINT NOT NULL DEFAULT 1,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_workspace_projects_workspace_visibility
-      ON workspace_projects(workspace_id, visibility, updated_at DESC);
+      ON workspace_projects(workspace_id NULLS FIRST, visibility NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS team_project_materializations (
-      workspace_id TEXT NOT NULL,
-      resource_team_id TEXT NOT NULL,
-      viewer_member_id TEXT NOT NULL,
-      owner_member_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      resource_id TEXT NOT NULL,
-      ref TEXT NOT NULL CHECK (ref = 'published'),
-      version INTEGER NOT NULL,
-      version_id TEXT NOT NULL,
-      manifest_digest TEXT NOT NULL,
-      lifecycle_state TEXT NOT NULL CHECK (lifecycle_state = 'active'),
-      authorized_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
+      workspace_id TEXT COLLATE "C" NOT NULL,
+      resource_team_id TEXT COLLATE "C" NOT NULL,
+      viewer_member_id TEXT COLLATE "C" NOT NULL,
+      owner_member_id TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C" NOT NULL,
+      resource_id TEXT COLLATE "C" NOT NULL,
+      ref TEXT COLLATE "C" NOT NULL CHECK (ref = 'published'),
+      version BIGINT NOT NULL,
+      version_id TEXT COLLATE "C" NOT NULL,
+      manifest_digest TEXT COLLATE "C" NOT NULL,
+      lifecycle_state TEXT COLLATE "C" NOT NULL CHECK (lifecycle_state = 'active'),
+      authorized_at TEXT COLLATE "C" NOT NULL,
+      expires_at TEXT COLLATE "C" NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (workspace_id, project_id),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
@@ -164,47 +205,47 @@ function migrate(db: SqliteDb): void {
     -- resource_id) themselves, or it becomes an orphan binding — the same
     -- failure mode workspace_projects_legacy_single_project once hit.
     CREATE TABLE IF NOT EXISTS workspace_resources (
-      resource_type TEXT NOT NULL,
-      resource_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      visibility TEXT NOT NULL CHECK (visibility IN ('personal', 'team')),
-      resource_state TEXT,
-      created_by_workspace_member_id TEXT,
-      updated_by_workspace_member_id TEXT,
-      resource_hub_resource_id TEXT,
-      cloud_tombstoned_at INTEGER,
-      sync_state TEXT,
-      version INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      resource_type TEXT COLLATE "C" NOT NULL,
+      resource_id TEXT COLLATE "C" NOT NULL,
+      workspace_id TEXT COLLATE "C" NOT NULL,
+      visibility TEXT COLLATE "C" NOT NULL CHECK (visibility IN ('personal', 'team')),
+      resource_state TEXT COLLATE "C",
+      created_by_workspace_member_id TEXT COLLATE "C",
+      updated_by_workspace_member_id TEXT COLLATE "C",
+      resource_hub_resource_id TEXT COLLATE "C",
+      cloud_tombstoned_at BIGINT,
+      sync_state TEXT COLLATE "C",
+      version BIGINT,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (resource_type, resource_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_workspace_resources_type_workspace
-      ON workspace_resources(resource_type, workspace_id, updated_at DESC);
+      ON workspace_resources(resource_type NULLS FIRST, workspace_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS templates (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      source_project_id TEXT,
-      files_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      description TEXT COLLATE "C",
+      source_project_id TEXT COLLATE "C",
+      files_json TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      title TEXT,
-      session_mode TEXT NOT NULL DEFAULT 'design',
-      intent_signals_json TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      title TEXT COLLATE "C",
+      session_mode TEXT COLLATE "C" NOT NULL DEFAULT 'design',
+      intent_signals_json TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_conv_project
-      ON conversations(project_id, updated_at DESC);
+      ON conversations(project_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS agent_sessions (
       conversation_id TEXT NOT NULL,
@@ -236,426 +277,269 @@ function migrate(db: SqliteDb): void {
     );
 
     CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      agent_id TEXT,
-      agent_name TEXT,
-      result_delivery_state TEXT,
-      events_json TEXT,
-      attachments_json TEXT,
-      produced_files_json TEXT,
-      trace_object_files_json TEXT,
-      feedback_json TEXT,
-      pre_turn_file_names_json TEXT,
-      session_mode TEXT,
-      run_context_json TEXT,
-      task_analytics_json TEXT,
-      applied_plugin_snapshot_json TEXT,
-      telemetry_finalized_at INTEGER,
-      started_at INTEGER,
-      ended_at INTEGER,
-      position INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      role TEXT COLLATE "C" NOT NULL,
+      content TEXT COLLATE "C" NOT NULL,
+      agent_id TEXT COLLATE "C",
+      agent_name TEXT COLLATE "C",
+      result_delivery_state TEXT COLLATE "C",
+      events_json TEXT COLLATE "C",
+      attachments_json TEXT COLLATE "C",
+      produced_files_json TEXT COLLATE "C",
+      trace_object_files_json TEXT COLLATE "C",
+      feedback_json TEXT COLLATE "C",
+      pre_turn_file_names_json TEXT COLLATE "C",
+      session_mode TEXT COLLATE "C",
+      run_context_json TEXT COLLATE "C",
+      task_analytics_json TEXT COLLATE "C",
+      applied_plugin_snapshot_json TEXT COLLATE "C",
+      telemetry_finalized_at BIGINT,
+      started_at BIGINT,
+      ended_at BIGINT,
+      position BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv
-      ON messages(conversation_id, position);
+      ON messages(conversation_id NULLS FIRST, position NULLS FIRST);
 
     -- Agent streams write small immutable batches while a run is active. The
     -- batches are folded into messages.events_json once, at the terminal
     -- boundary, so a long thinking stream never rewrites its full history on
     -- every flush window.
     CREATE TABLE IF NOT EXISTS message_event_batches (
-      id INTEGER PRIMARY KEY,
-      message_id TEXT NOT NULL,
-      events_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
+      id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+      message_id TEXT COLLATE "C" NOT NULL,
+      events_json TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
       FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_message_event_batches_message
-      ON message_event_batches(message_id, id);
+      ON message_event_batches(message_id NULLS FIRST, id NULLS FIRST);
 
     -- One row per one-time data maintenance pass that has run to completion
     -- (e.g. the heal of run events stored before the payload budget existed),
     -- so a finished pass is not re-scanned on every daemon start.
     CREATE TABLE IF NOT EXISTS daemon_maintenance_passes (
-      name TEXT PRIMARY KEY,
-      completed_at INTEGER NOT NULL
+      name TEXT COLLATE "C" PRIMARY KEY,
+      completed_at BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS preview_comments (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      element_id TEXT NOT NULL,
-      selector TEXT NOT NULL,
-      label TEXT NOT NULL,
-      text TEXT NOT NULL,
-      position_json TEXT NOT NULL,
-      html_hint TEXT NOT NULL,
-      selection_kind TEXT,
-      member_count INTEGER,
-      pod_members_json TEXT,
-      style_json TEXT,
-      attachments_json TEXT,
-      slide_index INTEGER,
-      slide_key INTEGER NOT NULL DEFAULT -1,
-      note TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      anchor_state TEXT,
-      anchored_version INTEGER,
-      author_member_id TEXT,
-      last_good_position_json TEXT,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      file_path TEXT COLLATE "C" NOT NULL,
+      element_id TEXT COLLATE "C" NOT NULL,
+      selector TEXT COLLATE "C" NOT NULL,
+      label TEXT COLLATE "C" NOT NULL,
+      text TEXT COLLATE "C" NOT NULL,
+      position_json TEXT COLLATE "C" NOT NULL,
+      html_hint TEXT COLLATE "C" NOT NULL,
+      selection_kind TEXT COLLATE "C",
+      member_count BIGINT,
+      pod_members_json TEXT COLLATE "C",
+      style_json TEXT COLLATE "C",
+      attachments_json TEXT COLLATE "C",
+      slide_index BIGINT,
+      slide_key BIGINT NOT NULL DEFAULT -1,
+      note TEXT COLLATE "C" NOT NULL,
+      status TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      anchor_state TEXT COLLATE "C",
+      anchored_version BIGINT,
+      author_member_id TEXT COLLATE "C",
+      last_good_position_json TEXT COLLATE "C",
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_preview_comments_conversation
-      ON preview_comments(project_id, conversation_id, updated_at DESC);
+      ON preview_comments(project_id NULLS FIRST, conversation_id NULLS FIRST, updated_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_preview_comments_conversation_created
-      ON preview_comments(project_id, conversation_id, created_at ASC);
+      ON preview_comments(project_id NULLS FIRST, conversation_id NULLS FIRST, created_at ASC NULLS FIRST);
 
     CREATE TABLE IF NOT EXISTS tabs (
-      project_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 0,
+      project_id TEXT COLLATE "C" NOT NULL,
+      name TEXT COLLATE "C" NOT NULL,
+      position BIGINT NOT NULL,
+      is_active BIGINT NOT NULL DEFAULT 0,
       PRIMARY KEY(project_id, name),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS tabs_state (
-      project_id TEXT PRIMARY KEY,
-      updated_at INTEGER NOT NULL,
-      state_json TEXT,
+      project_id TEXT COLLATE "C" PRIMARY KEY,
+      updated_at BIGINT NOT NULL,
+      state_json TEXT COLLATE "C",
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_tabs_project
-      ON tabs(project_id, position);
+      ON tabs(project_id NULLS FIRST, position NULLS FIRST);
 
     CREATE TABLE IF NOT EXISTS deployments (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      file_name TEXT NOT NULL,
-      provider_id TEXT NOT NULL,
-      url TEXT NOT NULL,
-      deployment_id TEXT,
-      deployment_count INTEGER NOT NULL DEFAULT 1,
-      target TEXT NOT NULL DEFAULT 'preview',
-      status TEXT NOT NULL DEFAULT 'ready',
-      status_message TEXT,
-      reachable_at INTEGER,
-      provider_metadata_json TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      file_name TEXT COLLATE "C" NOT NULL,
+      provider_id TEXT COLLATE "C" NOT NULL,
+      url TEXT COLLATE "C" NOT NULL,
+      deployment_id TEXT COLLATE "C",
+      deployment_count BIGINT NOT NULL DEFAULT 1,
+      target TEXT COLLATE "C" NOT NULL DEFAULT 'preview',
+      status TEXT COLLATE "C" NOT NULL DEFAULT 'ready',
+      status_message TEXT COLLATE "C",
+      reachable_at BIGINT,
+      provider_metadata_json TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       UNIQUE(project_id, file_name, provider_id),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_deployments_project
-      ON deployments(project_id, updated_at DESC);
+      ON deployments(project_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS routines (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      prompt TEXT NOT NULL,
-      schedule_kind TEXT NOT NULL,
-      schedule_value TEXT NOT NULL,
-      schedule_json TEXT,
-      project_mode TEXT NOT NULL,
-      project_id TEXT,
-      skill_id TEXT,
-      agent_id TEXT,
-      context_json TEXT,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      prompt TEXT COLLATE "C" NOT NULL,
+      schedule_kind TEXT COLLATE "C" NOT NULL,
+      schedule_value TEXT COLLATE "C" NOT NULL,
+      schedule_json TEXT COLLATE "C",
+      project_mode TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C",
+      skill_id TEXT COLLATE "C",
+      agent_id TEXT COLLATE "C",
+      context_json TEXT COLLATE "C",
+      enabled BIGINT NOT NULL DEFAULT 1,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS routine_runs (
-      id TEXT PRIMARY KEY,
-      routine_id TEXT NOT NULL,
-      trigger TEXT NOT NULL,
-      status TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      agent_run_id TEXT NOT NULL,
-      started_at INTEGER NOT NULL,
-      completed_at INTEGER,
-      summary TEXT,
-      error TEXT,
-      error_code TEXT,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      routine_id TEXT COLLATE "C" NOT NULL,
+      trigger TEXT COLLATE "C" NOT NULL,
+      status TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C" NOT NULL,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      agent_run_id TEXT COLLATE "C" NOT NULL,
+      started_at BIGINT NOT NULL,
+      completed_at BIGINT,
+      summary TEXT COLLATE "C",
+      error TEXT COLLATE "C",
+      error_code TEXT COLLATE "C",
       FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS routine_schedule_claims (
-      routine_id TEXT NOT NULL,
-      slot_at INTEGER NOT NULL,
-      claimed_at INTEGER NOT NULL,
+      routine_id TEXT COLLATE "C" NOT NULL,
+      slot_at BIGINT NOT NULL,
+      claimed_at BIGINT NOT NULL,
       PRIMARY KEY(routine_id, slot_at),
       FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_routine_runs_routine
-      ON routine_runs(routine_id, started_at DESC);
+      ON routine_runs(routine_id NULLS FIRST, started_at DESC NULLS LAST);
   `);
-  // Forward-compatible column add for databases created before metadata_json.
-  // SQLite has no IF NOT EXISTS for ALTER, so we check pragma_table_info.
-  const cols = db.prepare(`PRAGMA table_info(projects)`).all() as DbRow[];
-  if (!cols.some((c: DbRow) => c.name === 'metadata_json')) {
-    db.exec(`ALTER TABLE projects ADD COLUMN metadata_json TEXT`);
-  }
-  if (!cols.some((c: DbRow) => c.name === 'custom_instructions')) {
-    db.exec(`ALTER TABLE projects ADD COLUMN custom_instructions TEXT`);
-  }
-  const workspaceProjectCols = db.prepare(`PRAGMA table_info(workspace_projects)`).all() as DbRow[];
-  if (!workspaceProjectCols.some((c: DbRow) => c.name === 'resource_hub_resource_id')) {
-    db.exec(`ALTER TABLE workspace_projects ADD COLUMN resource_hub_resource_id TEXT`);
-  }
-  if (!workspaceProjectCols.some((c: DbRow) => c.name === 'cloud_tombstoned_at')) {
-    db.exec(`ALTER TABLE workspace_projects ADD COLUMN cloud_tombstoned_at INTEGER`);
-  }
-  migrateWorkspaceProjectsSingleHome(db);
-  const migratedWorkspaceProjectCols = db
-    .prepare(`PRAGMA table_info(workspace_projects)`)
-    .all() as DbRow[];
-  if (!migratedWorkspaceProjectCols.some((c: DbRow) => c.name === 'metadata_refresh_pending')) {
-    db.exec(
-      `ALTER TABLE workspace_projects ADD COLUMN metadata_refresh_pending INTEGER NOT NULL DEFAULT 0`,
-    );
-  }
-  const conversationCols = db.prepare(`PRAGMA table_info(conversations)`).all() as DbRow[];
-  if (!conversationCols.some((c: DbRow) => c.name === 'session_mode')) {
-    db.exec(`ALTER TABLE conversations ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'design'`);
-  }
-  if (!conversationCols.some((c: DbRow) => c.name === 'intent_signals_json')) {
-    db.exec(`ALTER TABLE conversations ADD COLUMN intent_signals_json TEXT`);
-  }
-  const messageCols = db.prepare(`PRAGMA table_info(messages)`).all() as DbRow[];
-  if (!messageCols.some((c: DbRow) => c.name === 'agent_id')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN agent_id TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'agent_name')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN agent_name TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'run_id')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN run_id TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'run_status')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN run_status TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'result_delivery_state')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN result_delivery_state TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'last_run_event_id')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN last_run_event_id TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'comment_attachments_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN comment_attachments_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'feedback_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN feedback_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'pre_turn_file_names_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN pre_turn_file_names_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'trace_object_files_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN trace_object_files_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'session_mode')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN session_mode TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'run_context_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN run_context_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'task_analytics_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN task_analytics_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'applied_plugin_snapshot_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN applied_plugin_snapshot_json TEXT`);
-  }
-  if (!messageCols.some((c: DbRow) => c.name === 'telemetry_finalized_at')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN telemetry_finalized_at INTEGER`);
-  }
+  // Columns added after the original CREATE TABLE, kept as additive
+  // migrations in their historical order so the column layout matches.
+  db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS metadata_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_instructions TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE workspace_projects ADD COLUMN IF NOT EXISTS resource_hub_resource_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE workspace_projects ADD COLUMN IF NOT EXISTS cloud_tombstoned_at BIGINT`);
+  db.exec(`ALTER TABLE workspace_projects ADD COLUMN IF NOT EXISTS metadata_refresh_pending BIGINT NOT NULL DEFAULT 0`);
+  db.exec(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_mode TEXT COLLATE "C" NOT NULL DEFAULT 'design'`);
+  db.exec(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS intent_signals_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS agent_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS agent_name TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS run_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS run_status TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS result_delivery_state TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS last_run_event_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS comment_attachments_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS pre_turn_file_names_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS trace_object_files_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS session_mode TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS run_context_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS task_analytics_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS applied_plugin_snapshot_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS telemetry_finalized_at BIGINT`);
   // Fork divider (delivered design, cell 38): the marker that says "this turn
   // was forked, and here is the title the new conversation inherited". It has
   // to be a stored column, not a client-side flag — the divider is only
   // honest if it is still there after a reload.
-  if (!messageCols.some((c: DbRow) => c.name === 'forked_into_json')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN forked_into_json TEXT`);
-  }
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS forked_into_json TEXT COLLATE "C"`);
   // Who stopped this turn (delivered design, cell 81). `runStatus: 'canceled'`
   // alone cannot tell a user's Stop from a daemon shutdown / project cleanup,
   // so the pause line would lie after a daemon restart. The origin has to be a
   // stored column for the same reason the fork divider is: the line is only
   // honest if it still says the same thing after a reload.
-  if (!messageCols.some((c: DbRow) => c.name === 'cancel_origin')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN cancel_origin TEXT`);
-  }
-  const routineRunCols = db.prepare(`PRAGMA table_info(routine_runs)`).all() as DbRow[];
-  if (!routineRunCols.some((c: DbRow) => c.name === 'error_code')) {
-    db.exec(`ALTER TABLE routine_runs ADD COLUMN error_code TEXT`);
-  }
-
-  const previewCommentCols = db.prepare(`PRAGMA table_info(preview_comments)`).all() as DbRow[];
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'selection_kind')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN selection_kind TEXT`);
-  }
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'member_count')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN member_count INTEGER`);
-  }
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'pod_members_json')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN pod_members_json TEXT`);
-  }
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'style_json')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN style_json TEXT`);
-  }
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'attachments_json')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN attachments_json TEXT`);
-  }
-  if (!previewCommentCols.some((c: DbRow) => c.name === 'slide_index')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN slide_index INTEGER`);
-  }
-  migratePreviewCommentsSlideKey(db);
-  // Team collaboration anchor columns — added after the slide-key rebuild so a legacy
-  // table rebuild cannot drop them.
-  const previewCommentAnchorCols = db.prepare(`PRAGMA table_info(preview_comments)`).all() as DbRow[];
-  if (!previewCommentAnchorCols.some((c: DbRow) => c.name === 'anchor_state')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN anchor_state TEXT`);
-  }
-  if (!previewCommentAnchorCols.some((c: DbRow) => c.name === 'anchored_version')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN anchored_version INTEGER`);
-  }
-  if (!previewCommentAnchorCols.some((c: DbRow) => c.name === 'author_member_id')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN author_member_id TEXT`);
-  }
-  if (!previewCommentAnchorCols.some((c: DbRow) => c.name === 'last_good_position_json')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN last_good_position_json TEXT`);
-  }
-  // Multiple comments per element: edit by explicit id; creating another note
-  // on the same element inserts a new row.
-  migratePreviewCommentsAllowMultiplePerElement(db);
+  db.exec(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS cancel_origin TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE routine_runs ADD COLUMN IF NOT EXISTS error_code TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS selection_kind TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS member_count BIGINT`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS pod_members_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS style_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS attachments_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS slide_index BIGINT`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS anchor_state TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS anchored_version BIGINT`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS author_member_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS last_good_position_json TEXT COLLATE "C"`);
   // Stable canvas pin numbering + persisted sidebar order (recvq5BVsolIxi).
-  // Added after the multi-per-element rebuild so a legacy table rebuild can
-  // never drop them (same reasoning as the anchor columns above).
-  const previewCommentPinCols = db.prepare(`PRAGMA table_info(preview_comments)`).all() as DbRow[];
-  if (!previewCommentPinCols.some((c: DbRow) => c.name === 'pin_seq')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN pin_seq INTEGER`);
-  }
-  if (!previewCommentPinCols.some((c: DbRow) => c.name === 'pin_seq_confirmed')) {
-    // 1 = final (no reconciliation pending). A NEW comment on a team-shared
-    // project starts at 0 until the collab-cloud push confirms the real
-    // cloud-assigned seq (see confirmPreviewCommentPinSeq) — see this file's
-    // upsertPreviewComment for why a locally-computed pin_seq can otherwise
-    // collide across two devices creating a comment in the same poll window.
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN pin_seq_confirmed INTEGER NOT NULL DEFAULT 1`);
-  }
-  if (!previewCommentPinCols.some((c: DbRow) => c.name === 'sort_key')) {
-    db.exec(`ALTER TABLE preview_comments ADD COLUMN sort_key REAL`);
-  }
-  backfillPreviewCommentPinSeqAndSortKey(db);
-  const deploymentCols = db.prepare(`PRAGMA table_info(deployments)`).all() as DbRow[];
-  if (!deploymentCols.some((c: DbRow) => c.name === 'status')) {
-    db.exec(`ALTER TABLE deployments ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'`);
-  }
-  if (!deploymentCols.some((c: DbRow) => c.name === 'status_message')) {
-    db.exec(`ALTER TABLE deployments ADD COLUMN status_message TEXT`);
-  }
-  if (!deploymentCols.some((c: DbRow) => c.name === 'reachable_at')) {
-    db.exec(`ALTER TABLE deployments ADD COLUMN reachable_at INTEGER`);
-  }
-  if (!deploymentCols.some((c: DbRow) => c.name === 'provider_metadata_json')) {
-    db.exec(`ALTER TABLE deployments ADD COLUMN provider_metadata_json TEXT`);
-  }
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS pin_seq BIGINT`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS pin_seq_confirmed BIGINT NOT NULL DEFAULT 1`);
+  db.exec(`ALTER TABLE preview_comments ADD COLUMN IF NOT EXISTS sort_key DOUBLE PRECISION`);
+  db.exec(`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS status TEXT COLLATE "C" NOT NULL DEFAULT 'ready'`);
+  db.exec(`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS status_message TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS reachable_at BIGINT`);
+  db.exec(`ALTER TABLE deployments ADD COLUMN IF NOT EXISTS provider_metadata_json TEXT COLLATE "C"`);
   // schedule_json holds the full RoutineSchedule object (kind discriminator
   // plus kind-specific fields like time/timezone/weekday). The legacy
   // schedule_kind/schedule_value columns are kept populated for query
   // convenience and as a fallback when reading rows written before this
   // column existed.
-  const routineCols = db.prepare(`PRAGMA table_info(routines)`).all() as DbRow[];
-  if (routineCols.length > 0 && !routineCols.some((c: DbRow) => c.name === 'schedule_json')) {
-    db.exec(`ALTER TABLE routines ADD COLUMN schedule_json TEXT`);
-  }
-  if (routineCols.length > 0 && !routineCols.some((c: DbRow) => c.name === 'context_json')) {
-    db.exec(`ALTER TABLE routines ADD COLUMN context_json TEXT`);
-  }
-  const agentSessionCols = db.prepare(`PRAGMA table_info(agent_sessions)`).all() as DbRow[];
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_hash')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_hash TEXT`);
-  }
+  db.exec(`ALTER TABLE routines ADD COLUMN IF NOT EXISTS schedule_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE routines ADD COLUMN IF NOT EXISTS context_json TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS stable_prompt_hash TEXT COLLATE "C"`);
   // Drift attribution (see agent_sessions CREATE TABLE comment). Rows written
   // before this column exists read back null and report `unattributed` for one
   // turn, then self-heal on the next write.
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_sections')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_sections TEXT`);
-  }
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS stable_prompt_sections TEXT COLLATE "C"`);
   // Resume identity guard columns (see agent_sessions CREATE TABLE comment).
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'model')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN model TEXT`);
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS model TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS cwd TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_message_id TEXT COLLATE "C"`);
+  db.exec(`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_input_tokens BIGINT`);
+  db.exec(`ALTER TABLE tabs_state ADD COLUMN IF NOT EXISTS state_json TEXT COLLATE "C"`);
+  // SQLite's implicit rowid broke created_at ties by insertion order for these
+  // tables; an identity column keeps that ordering explicit.
+  for (const table of ['conversations', 'messages', 'preview_comments']) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGINT GENERATED BY DEFAULT AS IDENTITY`);
   }
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'cwd')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN cwd TEXT`);
-  }
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'last_message_id')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN last_message_id TEXT`);
-  }
-  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'last_input_tokens')) {
-    db.exec(`ALTER TABLE agent_sessions ADD COLUMN last_input_tokens INTEGER`);
-  }
-  const tabsStateCols = db.prepare(`PRAGMA table_info(tabs_state)`).all() as DbRow[];
-  if (tabsStateCols.length > 0 && !tabsStateCols.some((c: DbRow) => c.name === 'state_json')) {
-    db.exec(`ALTER TABLE tabs_state ADD COLUMN state_json TEXT`);
-  }
-  migrateCritique(db);
-  migrateMediaTasks(db);
-  migrateLibrary(db);
-  migratePlugins(db);
-  migrateProjectScenarioBindings(db);
-  migrateStrategyTaskStore(db);
-  migrateChatArtifacts(db);
-  migrateCollabSyncSnapshots(db);
-  migrateCommentRelayOutbox(db);
-  migrateAmrTerminalReportOutbox(db);
-  migratePublicFilePublications(db);
 }
 
 /**
- * Bind every project to exactly ONE workspace, and make any other state
- * unrepresentable.
+ * Bind every project to exactly ONE workspace.
  *
  * Product ruling (2026-07-21): a project is created in a workspace and lives
  * there; sharing flips `visibility` within that workspace rather than projecting
  * the project into a second one. See collab/workspace-project-home.ts for the
  * full statement and for the rule that picks the surviving row.
  *
- * Two steps, in this order, inside one transaction:
- *   1. collapse the duplicate rows an older build's blanket back-fill wrote —
- *      on the dogfood database 23 of 31 projects had rows in 2-4 workspaces;
- *   2. narrow the primary key from `(workspace_id, project_id)` back to
- *      `project_id`, which is what it was before a migration widened it (the
- *      table it renamed was called `workspace_projects_legacy_single_project`).
- *
- * The order matters: the rebuild's INSERT would fail on the narrowed key if the
- * duplicates were still there. Step 1 therefore runs on every startup, not just
- * on the one that narrows the key, so a row that predates this build is repaired
- * even if the key was already narrow. It is idempotent and costs one indexed
- * scan.
- *
- * A migration rather than the startup reconciliation used for impossible team
- * shares (server.ts `reconcileImpossibleTeamShares`): that one needs the
- * workspace DIRECTORY to decide, which is a signed-in network fact, so it cannot
- * run before the first read. This one decides from the table alone, so it can —
- * and it must, because the read path below now assumes at most one row.
+ * `workspace_projects` is keyed by `project_id`, so duplicates cannot be
+ * written; this repair collapses any that a data import brings in. It is
+ * idempotent and costs one scan.
  */
-function migrateWorkspaceProjectsSingleHome(db: SqliteDb): void {
+function collapseDuplicateWorkspaceProjectHomes(db: SqliteDb): void {
   const collapse = db.transaction(() => {
     const rows = db
       .prepare(
@@ -688,164 +572,6 @@ function migrateWorkspaceProjectsSingleHome(db: SqliteDb): void {
         'A project belongs to one workspace; the extras came from an older blanket back-fill.',
     );
   }
-
-  const cols = db.prepare(`PRAGMA table_info(workspace_projects)`).all() as DbRow[];
-  const projectPk = cols.find((c: DbRow) => c.name === 'project_id')?.pk ?? 0;
-  const workspacePk = cols.find((c: DbRow) => c.name === 'workspace_id')?.pk ?? 0;
-  if (projectPk === 1 && workspacePk === 0) return;
-
-  db.exec(`
-    DROP INDEX IF EXISTS idx_workspace_projects_workspace_visibility;
-    ALTER TABLE workspace_projects RENAME TO workspace_projects_legacy_multi_workspace;
-    CREATE TABLE workspace_projects (
-      project_id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      visibility TEXT NOT NULL CHECK (visibility IN ('personal', 'team')),
-      resource_state TEXT NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
-      created_by_workspace_member_id TEXT,
-      updated_by_workspace_member_id TEXT,
-      resource_hub_resource_id TEXT,
-      cloud_tombstoned_at INTEGER,
-      sync_state TEXT,
-      metadata_refresh_pending INTEGER NOT NULL DEFAULT 0,
-      version INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
-    INSERT INTO workspace_projects
-      (project_id, workspace_id, visibility, resource_state,
-       created_by_workspace_member_id, updated_by_workspace_member_id,
-       resource_hub_resource_id, cloud_tombstoned_at,
-       sync_state, version, created_at, updated_at)
-    SELECT project_id, workspace_id, visibility, resource_state,
-           created_by_workspace_member_id, updated_by_workspace_member_id,
-           resource_hub_resource_id, cloud_tombstoned_at,
-           sync_state, version, created_at, updated_at
-      FROM workspace_projects_legacy_multi_workspace;
-    DROP TABLE workspace_projects_legacy_multi_workspace;
-    CREATE INDEX IF NOT EXISTS idx_workspace_projects_workspace_visibility
-      ON workspace_projects(workspace_id, visibility, updated_at DESC);
-  `);
-}
-
-function migratePreviewCommentsSlideKey(db: SqliteDb): void {
-  const table = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'preview_comments'`)
-    .get() as DbRow | undefined;
-  const tableSql = String(table?.sql ?? '');
-  const hasSlideKey = /\bslide_key\b/i.test(tableSql);
-  const hasLegacyUnique = /UNIQUE\s*\(\s*project_id\s*,\s*conversation_id\s*,\s*file_path\s*,\s*element_id\s*\)/i
-    .test(tableSql);
-  if (hasSlideKey && !hasLegacyUnique) return;
-
-  db.exec(`
-    CREATE TABLE preview_comments_next (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      element_id TEXT NOT NULL,
-      selector TEXT NOT NULL,
-      label TEXT NOT NULL,
-      text TEXT NOT NULL,
-      position_json TEXT NOT NULL,
-      html_hint TEXT NOT NULL,
-      selection_kind TEXT,
-      member_count INTEGER,
-      pod_members_json TEXT,
-      style_json TEXT,
-      attachments_json TEXT,
-      slide_index INTEGER,
-      slide_key INTEGER NOT NULL DEFAULT -1,
-      note TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-    );
-
-    INSERT INTO preview_comments_next
-      (id, project_id, conversation_id, file_path, element_id, selector, label,
-       text, position_json, html_hint, selection_kind, member_count, pod_members_json,
-       style_json, attachments_json, slide_index, slide_key, note, status, created_at, updated_at)
-    SELECT id, project_id, conversation_id, file_path, element_id, selector, label,
-       text, position_json, html_hint, selection_kind, member_count, pod_members_json,
-       style_json, attachments_json, slide_index, COALESCE(slide_index, -1), note, status, created_at, updated_at
-      FROM preview_comments;
-
-    DROP TABLE preview_comments;
-    ALTER TABLE preview_comments_next RENAME TO preview_comments;
-    CREATE INDEX IF NOT EXISTS idx_preview_comments_conversation
-      ON preview_comments(project_id, conversation_id, updated_at DESC);
-  `);
-}
-
-/**
- * Rebuild `preview_comments` so comments are keyed by `id` only.
- *
- * Older schemas had a natural unique key on project/conversation/file/element/
- * slide/author. That prevented multiple notes by the same member on one
- * element. Editing now requires the caller to send an explicit comment id.
- */
-function migratePreviewCommentsAllowMultiplePerElement(db: SqliteDb): void {
-  const table = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'preview_comments'`)
-    .get() as DbRow | undefined;
-  const tableSql = String(table?.sql ?? '');
-  const hasNaturalUnique = /UNIQUE\s*\([^)]*\bproject_id\b[^)]*\belement_id\b[^)]*\)/i.test(tableSql);
-  if (!hasNaturalUnique) return;
-
-  db.exec(`
-    CREATE TABLE preview_comments_multi_next (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      element_id TEXT NOT NULL,
-      selector TEXT NOT NULL,
-      label TEXT NOT NULL,
-      text TEXT NOT NULL,
-      position_json TEXT NOT NULL,
-      html_hint TEXT NOT NULL,
-      selection_kind TEXT,
-      member_count INTEGER,
-      pod_members_json TEXT,
-      style_json TEXT,
-      attachments_json TEXT,
-      slide_index INTEGER,
-      slide_key INTEGER NOT NULL DEFAULT -1,
-      note TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      anchor_state TEXT,
-      anchored_version INTEGER,
-      author_member_id TEXT,
-      last_good_position_json TEXT,
-      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-    );
-
-    INSERT INTO preview_comments_multi_next
-      (id, project_id, conversation_id, file_path, element_id, selector, label,
-       text, position_json, html_hint, selection_kind, member_count, pod_members_json,
-       style_json, attachments_json, slide_index, slide_key, note, status, created_at, updated_at,
-       anchor_state, anchored_version, author_member_id, last_good_position_json)
-    SELECT id, project_id, conversation_id, file_path, element_id, selector, label,
-       text, position_json, html_hint, selection_kind, member_count, pod_members_json,
-       style_json, attachments_json, slide_index, slide_key, note, status, created_at, updated_at,
-       anchor_state, anchored_version, author_member_id, last_good_position_json
-      FROM preview_comments;
-
-    DROP TABLE preview_comments;
-    ALTER TABLE preview_comments_multi_next RENAME TO preview_comments;
-    CREATE INDEX IF NOT EXISTS idx_preview_comments_conversation
-      ON preview_comments(project_id, conversation_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_preview_comments_conversation_created
-      ON preview_comments(project_id, conversation_id, created_at ASC);
-  `);
 }
 
 /**
@@ -1738,7 +1464,7 @@ function listLatestProjectRunStatusesUnobserved(db: SqliteDb) {
 // footer reads, so the two surfaces cannot disagree, and it survives reload
 // because the events were persisted per-event as the run streamed.
 function projectDisplayStatusForRunRow(
-  completenessEvents: Database.Statement,
+  completenessEvents: SqlStatement,
   status: unknown,
   messageId: string,
 ) {
@@ -1761,34 +1487,33 @@ function projectDisplayStatusForRunRow(
  * `isTodoWriteToolName` (every name it accepts contains `todo` or is
  * `update_plan`); the predicate itself still decides exactly.
  */
-function completenessEventsStatement(db: SqliteDb): Database.Statement {
+function completenessEventsStatement(db: SqliteDb): SqlStatement {
   return db.prepare(
     `SELECT event.value AS value
        FROM messages AS m,
-            json_each(
+            json_array_elements(
               CASE
-                WHEN json_valid(m.events_json) AND json_type(m.events_json) = 'array'
-                  THEN m.events_json
-                ELSE '[]'
+                WHEN m.events_json IS JSON ARRAY THEN m.events_json::json
+                ELSE '[]'::json
               END
-            ) AS event
+            ) WITH ORDINALITY AS event(value, ordinality)
       WHERE m.id = ?
-        AND event.type = 'object'
+        AND json_typeof(event.value) = 'object'
         AND (
-          json_extract(event.value, '$.kind') IN ('usage', 'done_key', 'text')
+          event.value ->> 'kind' IN ('usage', 'done_key', 'text')
           OR (
-            json_extract(event.value, '$.kind') = 'tool_use'
+            event.value ->> 'kind' = 'tool_use'
             AND (
-              lower(json_extract(event.value, '$.name')) LIKE '%todo%'
-              OR lower(json_extract(event.value, '$.name')) = 'update_plan'
+              lower(event.value ->> 'name') LIKE '%todo%'
+              OR lower(event.value ->> 'name') = 'update_plan'
             )
           )
         )
-      ORDER BY CAST(event.key AS INTEGER)`,
+      ORDER BY event.ordinality`,
   );
 }
 
-function completenessEventsOfMessage(statement: Database.Statement, messageId: string): unknown[] {
+function completenessEventsOfMessage(statement: SqlStatement, messageId: string): unknown[] {
   const rows = statement.all(messageId) as Array<{ value: string }>;
   const events: unknown[] = [];
   for (const row of rows) {
@@ -2406,21 +2131,20 @@ function terminalRunDurationSql(alias?: string) {
               END
             ELSE (
               SELECT CASE
-                       WHEN json_extract(usage_event.value, '$.durationMs') >= 0
-                         THEN json_extract(usage_event.value, '$.durationMs')
+                       WHEN (usage_event.value ->> 'durationMs')::double precision >= 0
+                         THEN (usage_event.value ->> 'durationMs')::double precision
                        ELSE 0
                      END
-                FROM json_each(
+                FROM json_array_elements(
                   CASE
-                    WHEN json_valid(${p}events_json) AND json_type(${p}events_json) = 'array'
-                      THEN ${p}events_json
-                    ELSE '[]'
+                    WHEN ${p}events_json IS JSON ARRAY THEN ${p}events_json::json
+                    ELSE '[]'::json
                   END
-                ) AS usage_event
-               WHERE usage_event.type = 'object'
-                 AND json_extract(usage_event.value, '$.kind') = 'usage'
-                 AND json_type(usage_event.value, '$.durationMs') IN ('integer', 'real')
-               ORDER BY CAST(usage_event.key AS INTEGER) DESC
+                ) WITH ORDINALITY AS usage_event(value, ordinality)
+               WHERE json_typeof(usage_event.value) = 'object'
+                 AND usage_event.value ->> 'kind' = 'usage'
+                 AND json_typeof(usage_event.value -> 'durationMs') = 'number'
+               ORDER BY usage_event.ordinality DESC
                LIMIT 1
             )
           END`;
@@ -2578,7 +2302,7 @@ function normalizeIntentSignals(value: unknown): ConversationIntentSignals {
  * The read+merge+write runs inside a BEGIN IMMEDIATE transaction: the write
  * lock is taken before the read, so no other connection can commit between
  * them and clobber a previously latched bit. Within one daemon process the
- * sequence is already non-interleavable (better-sqlite3 is synchronous and
+ * sequence is already non-interleavable (the database handle is synchronous and
  * there is no await point between read and write); the transaction pins the
  * monotonic guarantee against future refactors and multi-connection writers.
  */
@@ -2908,13 +2632,13 @@ export function listSiblingRunDoneKeys(
   const rows = db
     .prepare(
       `SELECT (
-          SELECT json_extract(event.value, '$.key')
-            FROM json_each(m.events_json) AS event
-           WHERE event.type = 'object'
-             AND json_extract(event.value, '$.kind') = 'done_key'
-             AND json_type(event.value, '$.key') = 'text'
-             AND json_extract(event.value, '$.key') <> ''
-           ORDER BY CAST(event.key AS INTEGER)
+          SELECT event.value ->> 'key'
+            FROM json_array_elements(m.events_json::json) WITH ORDINALITY AS event(value, ordinality)
+           WHERE json_typeof(event.value) = 'object'
+             AND event.value ->> 'kind' = 'done_key'
+             AND json_typeof(event.value -> 'key') = 'string'
+             AND event.value ->> 'key' <> ''
+           ORDER BY event.ordinality
            LIMIT 1
         ) AS doneKey
          FROM messages AS m
@@ -2923,8 +2647,7 @@ export function listSiblingRunDoneKeys(
           AND m.id <> ?
           AND m.events_json IS NOT NULL
           AND m.events_json LIKE '%"done_key"%'
-          AND json_valid(m.events_json)
-          AND json_type(m.events_json) = 'array'`,
+          AND m.events_json IS JSON ARRAY`,
     )
     .all(conversationId, excludeMessageId) as Array<{ doneKey: unknown }>;
   const keys = new Set<string>();
@@ -3463,8 +3186,8 @@ function hasMessageEventBatchStorage(db: SqliteDb): boolean {
     exists = Boolean(
       db.prepare(
         `SELECT 1
-           FROM sqlite_master
-          WHERE type = 'table' AND name = 'message_event_batches'`,
+           FROM information_schema.tables
+          WHERE table_schema = current_schema() AND table_name = 'message_event_batches'`,
       ).get(),
     );
   } catch {
@@ -4358,7 +4081,7 @@ export function mergeSyncedPreviewComment(
     );
     return true;
   }
-  // New comment. INSERT OR IGNORE guards against a rare id collision without
+  // New comment. ON CONFLICT DO NOTHING guards against a rare id collision without
   // throwing.
   //
   // pin_seq is taken straight from the wire's `seq` — the collab-cloud's own
@@ -4387,13 +4110,14 @@ export function mergeSyncedPreviewComment(
   }
   const result = db
     .prepare(
-      `INSERT OR IGNORE INTO preview_comments
+      `INSERT INTO preview_comments
          (id, project_id, conversation_id, file_path, element_id, selector, label,
           text, position_json, html_hint, selection_kind, member_count, pod_members_json,
           style_json, attachments_json, slide_index, slide_key, note, status, created_at, updated_at,
           anchor_state, anchored_version, author_member_id, last_good_position_json,
           pin_seq, pin_seq_confirmed, sort_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT DO NOTHING`,
     )
     .run(
       comment.id,
@@ -4733,11 +4457,27 @@ function isActiveMessageRunStatus(value: unknown): boolean {
 function oversizedEventExistsSql(column: string): string {
   return `EXISTS (
             SELECT 1
-              FROM json_each(${column}) AS event
-             WHERE event.type = 'object'
-               AND octet_length(event.value) > ${RUN_EVENT_JSON_BUDGET_BYTES}
-               AND COALESCE(json_extract(event.value, '$.kind'), '') NOT IN ('text', 'thinking')
+              FROM json_array_elements(${column}::json) AS event(value)
+             WHERE json_typeof(event.value) = 'object'
+               AND octet_length(event.value::text) > ${RUN_EVENT_JSON_BUDGET_BYTES}
+               AND COALESCE(event.value ->> 'kind', '') NOT IN ('text', 'thinking')
           )`;
+}
+
+/**
+ * One JSON array element as `{ type, value }`: containers and numbers as their
+ * JSON text, strings unwrapped, and `true`/`false`/`null` named by type.
+ */
+function healEventElementColumns(element: string): string {
+  return `CASE json_typeof(${element})
+            WHEN 'boolean' THEN ${element}::text
+            WHEN 'string' THEN 'text'
+            ELSE json_typeof(${element})
+          END AS type,
+          CASE json_typeof(${element})
+            WHEN 'string' THEN ${element} #>> '{}'
+            ELSE ${element}::text
+          END AS value`;
 }
 
 function healedEventsJson(
@@ -4750,6 +4490,7 @@ function healedEventsJson(
     switch (element.type) {
       case 'object':
       case 'array':
+      case 'number':
         value = JSON.parse(String(element.value));
         break;
       case 'true':
@@ -4823,7 +4564,7 @@ export function healOversizedMessageEvents(
       .prepare(
         `SELECT run_status AS runStatus,
                 octet_length(events_json) AS bytes,
-                (json_valid(events_json) AND json_type(events_json) = 'array') AS isArray
+                (events_json IS JSON ARRAY) AS isArray
            FROM messages
           WHERE id = ?`,
       )
@@ -4839,10 +4580,11 @@ export function healOversizedMessageEvents(
     const healed = healedEventsJson(
       db
         .prepare(
-          `SELECT event.type AS type, event.value AS value
-             FROM messages AS m, json_each(m.events_json) AS event
+          `SELECT ${healEventElementColumns('event.value')}
+             FROM messages AS m,
+                  json_array_elements(m.events_json::json) WITH ORDINALITY AS event(value, ordinality)
             WHERE m.id = ?
-            ORDER BY CAST(event.key AS INTEGER)`,
+            ORDER BY event.ordinality`,
         )
         .iterate(messageId) as Iterable<{ type: string; value: unknown }>,
     );
@@ -4867,7 +4609,7 @@ export function healOversizedMessageEventBatch(
       .prepare(
         `SELECT message.run_status AS runStatus,
                 octet_length(batch.events_json) AS bytes,
-                (json_valid(batch.events_json) AND json_type(batch.events_json) = 'array') AS isArray
+                (batch.events_json IS JSON ARRAY) AS isArray
            FROM message_event_batches AS batch
            LEFT JOIN messages AS message ON message.id = batch.message_id
           WHERE batch.id = ?`,
@@ -4887,10 +4629,11 @@ export function healOversizedMessageEventBatch(
     const healed = healedEventsJson(
       db
         .prepare(
-          `SELECT event.type AS type, event.value AS value
-             FROM message_event_batches AS batch, json_each(batch.events_json) AS event
+          `SELECT ${healEventElementColumns('event.value')}
+             FROM message_event_batches AS batch,
+                  json_array_elements(batch.events_json::json) WITH ORDINALITY AS event(value, ordinality)
             WHERE batch.id = ?
-            ORDER BY CAST(event.key AS INTEGER)`,
+            ORDER BY event.ordinality`,
         )
         .iterate(batchId) as Iterable<{ type: string; value: unknown }>,
     );
@@ -5307,9 +5050,10 @@ export function insertRoutineRun(db: SqliteDb, r: DbRow) {
 
 export function insertScheduledRoutineRun(db: SqliteDb, r: DbRow, slotAt: number) {
   const insertClaim = db.prepare(
-    `INSERT OR IGNORE INTO routine_schedule_claims
+    `INSERT INTO routine_schedule_claims
        (routine_id, slot_at, claimed_at)
-     VALUES (?, ?, ?)`,
+     VALUES (?, ?, ?)
+     ON CONFLICT DO NOTHING`,
   );
   const insertRun = db.prepare(
     `INSERT INTO routine_runs

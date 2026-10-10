@@ -21,7 +21,7 @@
 // can drain it into an array.
 
 import { randomUUID } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   AppliedPluginSnapshot,
   PluginPipeline,
@@ -34,7 +34,7 @@ import {
 } from '../genui/events.js';
 import { evaluateUntil, parseUntil, type UntilSignals } from './until.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface PipelineEnv {
   maxIterations: number; // OD_MAX_DEVLOOP_ITERATIONS

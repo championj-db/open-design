@@ -14,7 +14,7 @@
 // caller-provided `GenUIEventSink` from `events.ts`. Tests can swap either.
 
 import { createHash } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { GenUISurfaceSpec } from '@open-design/contracts';
 import {
   buildStateSyncedEvent,
@@ -35,7 +35,7 @@ import {
   type SurfaceTier,
 } from './store.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 // Stable digest of a JSON-Schema-shaped object. Used by `genui_surfaces`
 // rows so a schema upgrade auto-invalidates cached answers (spec §10.3.3).

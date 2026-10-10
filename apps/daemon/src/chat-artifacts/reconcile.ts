@@ -18,7 +18,7 @@
 // belong to a capture that has not reached its INSERT yet, and sweeping it
 // would break a live turn.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import fs from 'node:fs';
 
 import type { ChatArtifactBlobStore } from './blob-store.js';
@@ -34,7 +34,7 @@ import {
 import type { ChatArtifactQuota } from './quota.js';
 
 export interface ChatArtifactReconcileDeps {
-  db: Database.Database;
+  db: SqlDatabase;
   blobs: ChatArtifactBlobStore;
   quota?: ChatArtifactQuota;
   /**
