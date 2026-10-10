@@ -614,7 +614,6 @@ type ScreenshotExportRequest = {
 export interface RegisterProjectExportRoutesDeps extends RouteDeps<'db' | 'http' | 'paths' | 'node' | 'ids' | 'projectStore' | 'exports' | 'projectFiles' | 'validation' | 'auth' | 'projectPreviewScopes'> {
   authorizeProjectRequest: AuthorizeProjectRequest;
   authorizeProjectToolRequest: AuthorizeProjectToolRequest;
-  isApiTokenAuthorization: (authorization: string | undefined) => boolean;
 }
 
 export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectExportRoutesDeps) {
@@ -671,7 +670,6 @@ export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectEx
     if (
       typeof authorization === 'string'
       && /^Bearer(?:\s|$)/i.test(authorization.trim())
-      && !ctx.isApiTokenAuthorization(authorization)
     ) {
       const grant = ctx.auth.authorizeToolRequest(
         req,

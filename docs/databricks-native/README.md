@@ -17,16 +17,48 @@ Model Serving, UC Volumes, removal list) live in
   `7456`, and binds `0.0.0.0` whenever a platform port is present. An explicit
   `OD_BIND_HOST` still wins. Local runs with none of these set keep the
   loopback default `127.0.0.1:7456`.
-- The Apps proxy authenticates users before requests reach the container. For
-  Wave 1, `app.yaml` sets `OD_DISABLE_API_AUTH=1` (the daemon's existing
-  trusted-reverse-proxy mode), because a non-loopback bind otherwise requires
-  `OD_API_TOKEN`.
-- Browser API calls: the daemon's origin check currently accepts only
-  loopback/LAN hosts, so requests from the app's `https://<app-name>.<...>.databricksapps.com`
-  origin will be rejected until that host is allowlisted. As an interim measure
-  add it via `OD_ALLOWED_ORIGINS` (comma-separated) in `app.yaml` `env`, e.g.
-  `OD_ALLOWED_ORIGINS=https://<app-name>.<region>.databricksapps.com`. The auth
-  wave will fold Databricks app origins into the check natively.
+- Auth is per-request on-behalf-of (OBO); see "Authentication" below.
+
+## Authentication (OBO)
+
+The Apps proxy signs users in and forwards a short-lived user OAuth token in
+`X-Forwarded-Access-Token`. The daemon's `/api/*` gate
+(`apps/daemon/src/auth/databricks-obo.ts`) requires it on every request:
+
+- The token is exchanged for an identity with SCIM
+  `GET {DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me`. The resolved user (stable
+  id, userName/email, display name, group names) is cached per token for 60
+  seconds, keyed by a hash of the token. The token itself is never logged or
+  stored.
+- No token, or a token SCIM rejects, is a `401`. SCIM unreachable is a `503`.
+  There is no fallback to the app service principal.
+- `X-Forwarded-Email` / `-User` / `-Preferred-Username` are display hints and
+  are never used for authorization.
+- Admitted without a user: `/api/health`, `/api/ready`, `/api/version`; GETs of
+  server-minted project preview asset scopes (sandboxed iframes cannot send
+  headers); and run-scoped agent tool tokens on the exact tool routes their
+  grant names (each route still checks operation and project).
+- Route code reads the caller with `getCurrentUser(req)` /
+  `requireCurrentUser()` from `apps/daemon/src/auth/current-user.ts`
+  (request-scoped, also available through AsyncLocalStorage). Data is not yet
+  scoped per user; the store is still single-tenant.
+
+Enable **user authorization** on the app (the default user identity scope is
+enough for SCIM `Me`). `DATABRICKS_HOST` is injected by the platform.
+
+Local development outside Databricks Apps: set `OD_LOCAL_DEV_USER=<email>` to
+run requests without a forwarded token as that user. It is off by default, and
+the daemon refuses to start with it when `DATABRICKS_APP_NAME` or
+`DATABRICKS_APP_PORT` is set. With `DATABRICKS_HOST` pointed at a workspace,
+you can also send a real `X-Forwarded-Access-Token` locally.
+
+Browser origin check: besides loopback/LAN, the daemon accepts the app's own
+origin (`DATABRICKS_APP_URL`, and any `https://*.databricksapps.com` origin that
+matches the request's `Host` / `X-Forwarded-Host`, i.e. same-origin through the
+proxy). Other `databricksapps.com` apps are not trusted automatically; list any
+extra origin in `OD_ALLOWED_ORIGINS` (comma-separated).
+
+`OD_API_TOKEN` and `OD_DISABLE_API_AUTH` were removed.
 
 ## Database: Lakebase (Postgres)
 
@@ -95,6 +127,9 @@ Then sync the repo root to the workspace and deploy it with
 
 ## Status
 
+Wave 2 (auth): OBO request authentication replaced `OD_API_TOKEN` (see
+"Authentication" above).
+
 Wave 2 (database): the daemon's relational store moved from SQLite /
 `better-sqlite3` to Postgres / Lakebase (see "Database" above). Per-user data
 isolation is not part of it yet; the store is still single-tenant.
@@ -111,10 +146,6 @@ This wave only adds the deploy skeleton and removes platforms we are dropping:
 
 Not done yet, planned for later waves:
 
-- **Auth**: OBO via `X-Forwarded-Access-Token` replacing `OD_API_TOKEN`,
-  Vela/AMR, and external OAuth. Browser origin checks will also need to accept
-  the app's `*.databricksapps.com` host (today that needs
-  `OD_ALLOWED_ORIGINS`).
 - **AI**: Model Serving / AI Gateway replacing the spawned agent CLIs and BYOK.
 - **Storage**: UC Volumes for project artifacts.
 - **Cleanup**: telemetry (PostHog/Langfuse), media providers, Figma,

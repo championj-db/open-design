@@ -191,7 +191,6 @@ export interface ServerContext {
   projectStore: any;
   authorizeProjectRequest: AuthorizeProjectRequest;
   authorizeProjectToolRequest: AuthorizeProjectToolRequest;
-  isApiTokenAuthorization: (authorization: string | undefined) => boolean;
   projectFiles: any;
   conversations: any;
   templates: any;

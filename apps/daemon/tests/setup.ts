@@ -53,6 +53,10 @@ process.env.OD_PG_SCHEMA_PER_DATA_DIR ??= '1';
 // Keep unit tests from reading a developer's stored Vela profile and routing
 // Langfuse-shaped telemetry through the authenticated Vela sink by accident.
 process.env.OPEN_DESIGN_VELA_TELEMETRY ??= 'off';
+// The /api gate requires a Databricks OBO identity. Daemon suites run outside
+// Databricks Apps, so they use the explicit local-dev user; the OBO auth suite
+// (tests/databricks-obo-auth.test.ts) clears this to exercise fail-closed.
+process.env.OD_LOCAL_DEV_USER ??= 'vitest@open-design.local';
 
 // Publish/share endpoints shell out through OD_NODE_BIN + OD_BIN (dist/cli.js).
 // Build the CLI artifact once per vitest process so package tests do not depend

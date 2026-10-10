@@ -9,13 +9,18 @@ export interface RequestWithOriginHeaders {
     host?: unknown;
     origin?: unknown;
     'sec-fetch-site'?: unknown;
+    'x-forwarded-host'?: unknown;
   };
 }
 
+/**
+ * Browser origins allowed in addition to loopback/LAN: the comma-separated
+ * `OD_ALLOWED_ORIGINS`, plus the app's own URL when Databricks Apps provides
+ * it as `DATABRICKS_APP_URL`.
+ */
 export function configuredAllowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.OD_ALLOWED_ORIGINS || '';
-  if (!raw.trim()) return [];
-  return raw
+  const origins = raw
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean)
@@ -26,6 +31,50 @@ export function configuredAllowedOrigins(env: NodeJS.ProcessEnv = process.env): 
       }
       return parsed.origin;
     });
+  const appUrl = databricksAppUrlOrigin(env);
+  if (appUrl && !origins.includes(appUrl)) origins.push(appUrl);
+  return origins;
+}
+
+export const DATABRICKS_APPS_DOMAIN_SUFFIX = '.databricksapps.com';
+
+function databricksAppUrlOrigin(env: NodeJS.ProcessEnv): string | null {
+  const raw = env.DATABRICKS_APP_URL?.trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return parsed.protocol === 'https:' ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Accept a Databricks Apps origin (`https://<app>.databricksapps.com`) when it
+ * is the origin the request was addressed to, i.e. a same-origin call from
+ * the app's own UI through the Apps proxy. Other apps share the
+ * `databricksapps.com` site, so a sibling app's origin is NOT accepted here;
+ * list it in `OD_ALLOWED_ORIGINS` if it must call this app.
+ */
+export function isDatabricksAppSameOrigin(
+  origin: unknown,
+  hostHeader: unknown,
+  forwardedHostHeader?: unknown,
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(String(origin));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.port) return false;
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname.endsWith(DATABRICKS_APPS_DOMAIN_SUFFIX)) return false;
+  const requestHosts = [forwardedHostHeader, hostHeader]
+    .flatMap((value) => String(headerValue(value) ?? '').split(','))
+    .map((value) => value.trim().toLowerCase().replace(/:443$/, ''))
+    .filter(Boolean);
+  return requestHosts.includes(hostname);
 }
 
 export function configuredAllowedHosts(origins = configuredAllowedOrigins()): string[] {
@@ -250,6 +299,7 @@ export function isLocalSameOrigin(
   // a client-supplied origin that exactly matches an explicitly allow-
   // listed entry is the documented escape hatch for these deployments.
   if (extraAllowedOrigins.includes(origin)) return true;
+  if (isDatabricksAppSameOrigin(origin, req.headers?.host, req.headers?.['x-forwarded-host'])) return true;
   if (!isAllowedBrowserHost(host, ports, bindHost, extraAllowedOrigins)) return false;
   return isAllowedBrowserOrigin(origin, host, ports, bindHost, extraAllowedOrigins);
 }

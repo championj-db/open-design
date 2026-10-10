@@ -17,7 +17,6 @@ const daemonRoot = fileURLToPath(new URL('..', import.meta.url));
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const cliEntry = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const tsxCli = path.join(repoRoot, 'node_modules/tsx/dist/cli.mjs');
-const daemonApiToken = 'nonloopback-daemon-api-token';
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
@@ -98,7 +97,9 @@ describe('od export non-loopback run-scoped authority', () => {
     }
 
     daemonHost = await reachableNonLoopbackIpv4();
-    vi.stubEnv('OD_API_TOKEN', daemonApiToken);
+    // Run with the OBO gate active: no local-dev user, so only run-scoped
+    // tool tokens can reach the export routes without a forwarded token.
+    vi.stubEnv('OD_LOCAL_DEV_USER', '');
     const started = await startServer({
       port: 0,
       host: daemonHost,
@@ -113,7 +114,6 @@ describe('od export non-loopback run-scoped authority', () => {
     });
     if (!isStartedServer(started)) throw new Error('daemon did not return its server handle');
     daemon = started;
-    vi.stubEnv('OD_API_TOKEN', 'changed-after-server-start');
   });
 
   afterAll(async () => {
@@ -130,12 +130,12 @@ describe('od export non-loopback run-scoped authority', () => {
 
   it('exports through the actual CLI with a valid tool token over a non-loopback daemon URL', async () => {
     // Given: the advertised daemon URL is a reachable non-loopback socket, and general API
-    // requests from this peer still require the configured broad daemon credential.
+    // requests without a forwarded Databricks token are rejected.
     expect(new URL(daemon.url).hostname).toBe(daemonHost);
     const unauthenticated = await fetch(`${daemon.url}/api/projects`);
     expect(unauthenticated.status).toBe(401);
     await expect(unauthenticated.json()).resolves.toMatchObject({
-      error: { code: 'API_TOKEN_REQUIRED' },
+      error: { code: 'UNAUTHORIZED' },
     });
     const token = toolTokenRegistry.mint({
       projectId,
@@ -146,26 +146,10 @@ describe('od export non-loopback run-scoped authority', () => {
     // When: the real wrapper runs with only its run-scoped token and advertised daemon URL.
     const result = await runExportCli(projectId, outputPath, token);
 
-    // Then: the outer daemon-token middleware admits only this endpoint capability, and the
+    // Then: the /api OBO gate admits only this endpoint capability, and the
     // existing route authorization returns the renderer's exact bytes through the real CLI.
     expect(result.code, result.stderr).toBe(0);
     expect(await readFile(outputPath)).toEqual(png);
-  });
-
-  it('preserves the configured daemon API-token export lane over non-loopback HTTP', async () => {
-    // Given: the daemon credential captured at startup is distinct from every run-scoped token.
-    const response = await fetch(`${daemon.url}/api/projects/${projectId}/export/image`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${daemonApiToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ fileName: 'index.html' }),
-    });
-
-    // When/Then: the matching broad token stays on project authorization and returns exact bytes.
-    expect(response.status).toBe(200);
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
   });
 
   it.each([
@@ -192,9 +176,9 @@ describe('od export non-loopback run-scoped authority', () => {
     const outputPath = path.join(outputDir, `${kind.replaceAll(' ', '-')}.png`);
     const result = await runExportCli(projectId, outputPath, token());
 
-    // Then: it cannot bypass broad daemon auth or create an export.
+    // Then: it cannot bypass the OBO gate or create an export.
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('API_TOKEN_REQUIRED');
+    expect(result.stderr).toContain('UNAUTHORIZED');
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -210,9 +194,9 @@ describe('od export non-loopback run-scoped authority', () => {
     // When: the actual CLI reaches the non-loopback daemon boundary.
     const result = await runExportCli(projectId, path.join(outputDir, 'wrong-operation.png'), token);
 
-    // Then: it cannot bypass broad daemon auth or reach route work.
+    // Then: the gate admits the named endpoint, and the route refuses the operation.
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain('API_TOKEN_REQUIRED');
+    expect(result.stderr).toContain('TOOL_OPERATION_DENIED');
   });
 
   it('enforces the exact token project after outer preauthorization', async () => {
@@ -270,10 +254,10 @@ describe('od export non-loopback run-scoped authority', () => {
       ...(method === 'POST' ? { body: JSON.stringify({ fileName: 'index.html' }) } : {}),
     });
 
-    // Then: the outer daemon-token boundary refuses it before any route work runs.
+    // Then: the /api OBO gate refuses it before any route work runs.
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'API_TOKEN_REQUIRED' },
+      error: { code: 'UNAUTHORIZED' },
     });
   });
 
@@ -286,10 +270,10 @@ describe('od export non-loopback run-scoped authority', () => {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    // Then: the general daemon-token middleware remains unchanged.
+    // Then: the /api OBO gate still requires a Databricks user.
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'API_TOKEN_REQUIRED' },
+      error: { code: 'UNAUTHORIZED' },
     });
   });
 
@@ -305,7 +289,6 @@ describe('od export non-loopback run-scoped authority', () => {
       OD_PROJECT_ID: requestedProjectId,
       OD_TOOL_TOKEN: token,
     };
-    delete env.OD_API_TOKEN;
     try {
       const { stdout, stderr } = await execFileP(
         process.execPath,

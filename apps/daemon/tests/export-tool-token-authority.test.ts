@@ -35,7 +35,6 @@ const png = Buffer.from(
 );
 const rendererCss = Buffer.from('main { color: rgb(12, 34, 56); }\n');
 const rendererImage = Buffer.from('renderer-image-exact-bytes');
-const daemonApiToken = 'configured-daemon-api-token';
 const legacyBaseHref = 'https://external.invalid/legacy/';
 const rendererStylesheetPath = 'styles/export.css';
 const rendererImagePath = 'assets/hero.png';
@@ -144,7 +143,6 @@ describe('od export run-scoped project authority', () => {
     vi.stubEnv('OD_WORKSPACE_CONTEXT_SOURCE', 'vela');
     vi.stubEnv('VELA_CONTROL_KEY', 'test-control-key');
     vi.stubEnv('VELA_API_URL', `http://127.0.0.1:${authorityAddress.port}`);
-    vi.stubEnv('OD_API_TOKEN', daemonApiToken);
 
     const renderer = (input: DesktopRenderSlidesInput): Promise<DesktopRenderSlidesResult> => {
       const pending = pendingRenderer;
@@ -185,7 +183,6 @@ describe('od export run-scoped project authority', () => {
     }) as { url: string; shutdown: () => Promise<void> | void };
     daemonUrl = started.url;
     daemonShutdown = started.shutdown;
-    vi.stubEnv('OD_API_TOKEN', 'changed-after-server-start');
   });
 
   afterAll(async () => {
@@ -195,26 +192,6 @@ describe('od export run-scoped project authority', () => {
     closeDatabase();
     vi.unstubAllEnvs();
     await rm(outputDir, { recursive: true, force: true });
-  });
-
-  it('accepts the configured daemon API token for screenshot export', async () => {
-    // Given: the API token captured by the daemon at startup, before the env changed.
-    const request = {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${daemonApiToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ fileName: 'index.html' }),
-    } as const;
-
-    // When: the configured credential requests a screenshot export.
-    const response = await fetch(`${daemonUrl}/api/projects/${unboundProjectId}/export/image`, request);
-    const body = Buffer.from(await response.arrayBuffer());
-
-    // Then: it remains on the daemon API-token lane and the export succeeds.
-    expect(response.status, body.toString()).toBe(200);
-    expect(body).toEqual(png);
   });
 
   it('exports the exact token-bound project without explicit workspace flags', async () => {
@@ -537,7 +514,7 @@ describe('od export run-scoped project authority', () => {
   });
 
   it('still routes foreign Bearer credentials to the run-scoped tool-token lane', async () => {
-    // Given: a Bearer credential that is neither the daemon API token nor a minted grant.
+    // Given: a Bearer credential that is not a minted grant.
     const request = {
       method: 'POST',
       headers: {
