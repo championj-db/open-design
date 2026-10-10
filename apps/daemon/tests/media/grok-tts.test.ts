@@ -188,7 +188,7 @@ describe('xAI Grok TTS media generation', () => {
   });
 
   it('rejects when no credentials are available anywhere', async () => {
-    // No env, no stored, no xai-tokens.json, no Hermes auth.
+    // No env, no stored, no Hermes auth.
     await expect(
       generateMedia({
         projectRoot,

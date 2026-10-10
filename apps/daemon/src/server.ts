@@ -908,7 +908,6 @@ import { registerPluginAssetRoutes } from './routes/plugins/assets.js';
 import { registerPluginMarketplaceRoutes } from './routes/plugins/marketplaces.js';
 import { registerPluginEventRoutes, registerPluginRoutes, registerProjectPluginRoutes } from './routes/plugins/index.js';
 import { registerMcpRoutes } from './mcp-routes.js';
-import { registerXaiRoutes } from './routes/xai.js';
 import { registerLiveArtifactRoutes } from './routes/live-artifact.js';
 import { registerDeliverableSyntaxToolRoutes } from './routes/deliverable-syntax-tool.js';
 import { registerDesignSystemToolRoutes } from './routes/design-system-tool.js';
@@ -8561,10 +8560,6 @@ export async function startServer({
     http: httpDeps,
     paths: pathDeps,
     mcp: { pendingAuth: mcpPendingAuth, daemonUrlRef, inheritedEnvironment },
-  });
-  registerXaiRoutes(app, {
-    http: httpDeps,
-    paths: pathDeps,
   });
   // Project workspace
   registerActiveContextRoutes(app, {

@@ -580,28 +580,10 @@ describe('media-config Grok / xAI OAuth fallback', () => {
     await writeFile(file, JSON.stringify(data), 'utf8');
   }
 
-  async function writeOdXaiTokens(token: {
-    accessToken: string;
-    refreshToken?: string;
-    expiresAt?: number;
-  }) {
-    const file = path.join(projectRoot, '.od', 'xai-tokens.json');
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(
-      file,
-      JSON.stringify({
-        token: {
-          accessToken: token.accessToken,
-          tokenType: 'Bearer',
-          savedAt: Date.now(),
-          ...(token.refreshToken ? { refreshToken: token.refreshToken } : {}),
-          ...(token.expiresAt !== undefined
-            ? { expiresAt: token.expiresAt }
-            : {}),
-        },
-      }),
-      'utf8',
-    );
+  async function writeHermesXaiToken(accessToken: string) {
+    await writeHomeJson('.hermes/auth.json', {
+      providers: { 'xai-oauth': { tokens: { access_token: accessToken } } },
+    });
   }
 
   async function writeStoredMediaConfig(data: unknown) {
@@ -613,23 +595,6 @@ describe('media-config Grok / xAI OAuth fallback', () => {
   function grokProvider(masked: { providers: unknown }) {
     return (masked.providers as Record<string, unknown>).grok;
   }
-
-  it('uses OD-native xai-tokens.json when one is stored', async () => {
-    await writeOdXaiTokens({
-      accessToken: 'od-bearer-1',
-      expiresAt: Date.now() + 3_600_000,
-    });
-
-    const resolved = await resolveProviderConfig(projectRoot, 'grok');
-    const masked = await readMaskedConfig(projectRoot);
-
-    expect(resolved.apiKey).toBe('od-bearer-1');
-    expect(grokProvider(masked)).toMatchObject({
-      configured: true,
-      source: 'oauth-xai-stored',
-      apiKeyTail: '',
-    });
-  });
 
   it('borrows the Hermes-side xai-oauth token when OD has no native creds', async () => {
     await writeHomeJson('.hermes/auth.json', {
@@ -650,29 +615,9 @@ describe('media-config Grok / xAI OAuth fallback', () => {
     });
   });
 
-  it('prefers OD-native xai-tokens over Hermes borrowing', async () => {
-    await writeOdXaiTokens({
-      accessToken: 'od-bearer-2',
-      expiresAt: Date.now() + 3_600_000,
-    });
-    await writeHomeJson('.hermes/auth.json', {
-      providers: {
-        'xai-oauth': {
-          tokens: { access_token: 'hermes-xai-bearer' },
-        },
-      },
-    });
-
-    const resolved = await resolveProviderConfig(projectRoot, 'grok');
-    expect(resolved.apiKey).toBe('od-bearer-2');
-  });
-
   it('keeps env keys ahead of OAuth fallbacks', async () => {
     process.env.XAI_API_KEY = 'env-xai-key';
-    await writeOdXaiTokens({
-      accessToken: 'od-bearer-3',
-      expiresAt: Date.now() + 3_600_000,
-    });
+    await writeHermesXaiToken('od-bearer-3');
 
     const resolved = await resolveProviderConfig(projectRoot, 'grok');
     const masked = await readMaskedConfig(projectRoot);
@@ -690,10 +635,7 @@ describe('media-config Grok / xAI OAuth fallback', () => {
         grok: { apiKey: 'stored-grok-key', baseUrl: 'https://api.x.ai/v1' },
       },
     });
-    await writeOdXaiTokens({
-      accessToken: 'od-bearer-4',
-      expiresAt: Date.now() + 3_600_000,
-    });
+    await writeHermesXaiToken('od-bearer-4');
 
     const resolved = await resolveProviderConfig(projectRoot, 'grok');
     expect(resolved.apiKey).toBe('stored-grok-key');
@@ -710,18 +652,6 @@ describe('media-config Grok / xAI OAuth fallback', () => {
     });
   });
 
-  it('skips an OD-native token within the expiry skew when no refresh_token is stored', async () => {
-    // expiresAt within the 120s skew window → treated as expired by
-    // resolveXAIBearer. Without a refresh_token it can't recover, so
-    // the resolver falls through to other sources (none here).
-    await writeOdXaiTokens({
-      accessToken: 'od-bearer-expired',
-      expiresAt: Date.now() + 30_000,
-    });
-
-    const resolved = await resolveProviderConfig(projectRoot, 'grok');
-    expect(resolved.apiKey).toBe('');
-  });
 });
 
 describe('media-config model alias resolution (issue #1277)', () => {

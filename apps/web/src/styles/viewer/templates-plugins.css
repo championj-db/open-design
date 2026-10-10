@@ -670,51 +670,6 @@
   backdrop-filter: var(--material-thin-backdrop);
 }
 
-/* xAI OAuth paste-back: shown while a Sign in flow is in flight, in case
-   xAI returns a code instead of redirecting to the loopback listener. */
-.xai-oauth-paste {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
-}
-.xai-oauth-paste .hint {
-  font-size: 12px;
-}
-.xai-oauth-paste-row {
-  display: flex;
-  gap: 6px;
-  align-items: stretch;
-}
-.xai-oauth-paste-row input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Heads-up banner shown while a Sign-in flow is awaiting callback. xAI
-   sometimes renders a "Cannot connect" page that misleads the user into
-   thinking auth failed; this banner tells them to ignore that page and
-   stay on the OD panel. */
-.xai-oauth-warning {
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 10px 12px;
-  border: 1px solid var(--accent);
-  border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--text);
-  margin-top: 6px;
-}
-.xai-oauth-warning strong {
-  color: var(--accent);
-}
-.xai-oauth-warning em {
-  font-style: normal;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
 /* PluginLoopHome — the minimum-closed-loop Home entry: a single prompt
    textarea + plugin grid with "Use example query" affordance. Replaces
    the tabbed NewProjectPanel on Home until the plugin-first UX matures. */

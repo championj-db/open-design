@@ -143,7 +143,6 @@ import { MEDIA_PROVIDERS } from '../media/models';
 import { useByokImageModelOptions, useByokVideoModelOptions, useByokSpeechModelOptions } from '../media/aihubmix-image-models';
 import { isVisualStabilityMode } from '../utils/visualStability';
 import { byokProviderRequiresApiKey } from '../utils/byokProvider';
-import { XaiOAuthControl } from './XaiOAuthControl';
 import type { MediaProvider } from '../media/models';
 import { Toast } from './Toast';
 import {
@@ -8014,7 +8013,6 @@ function MediaProvidersSection({
               ) : null}
             </div>
           </div>
-          {activeProvider.id === 'grok' ? <XaiOAuthControl /> : null}
           {activeRequiresCredentials ? (
             <div className="media-provider-detail-grid">
               <label className="media-provider-detail-field">
