@@ -35,6 +35,8 @@ import {
   resolveSystemProxyEnv,
 } from '@open-design/platform';
 import { attachAcpSession } from './agent-protocol/index.js';
+import { testDatabricksAgentConnection } from './agent-protocol/databricks/index.js';
+import { getCurrentUserAccessToken } from './auth/current-user.js';
 import { attachPiRpcSession } from './agent-protocol/index.js';
 import { attachDshProfileSession } from './agent-protocol/index.js';
 import { createClaudeStreamHandler } from './runtimes/claude-stream.js';
@@ -81,19 +83,8 @@ import {
   type ProviderTestRequest,
 } from '@open-design/contracts/api/connectionTest';
 import { googleGenerateContentUrl } from './integrations/google-models.js';
-import { readVelaCredentialRevision, resolveAmrProfile } from './integrations/vela.js';
-import { amrModelLoadingCache } from './runtimes/amr-model-cache.js';
-import { buildAmrModelCacheKey } from './runtimes/amr-model-probe.js';
-import {
-  fetchVelaPresetModels,
-  fetchVelaRemoteModelsWithRetry,
-} from './runtimes/defs/amr.js';
-import {
-  getRememberedLiveModels,
-  preferFreshLiveModels,
-  resolveDefaultModelFromOptions,
-  resolveModelForAgent,
-} from './runtimes/models.js';
+import { resolveAmrProfile } from './integrations/vela.js';
+import { resolveModelForAgent } from './runtimes/models.js';
 import {
   BYOK_OPENCODE_PROVIDER_ID,
   buildOpenCodeByokProviderConfig,
@@ -2291,36 +2282,6 @@ async function prepareOpenCodeConnectionTestCwd(tempDir: string): Promise<void> 
   }
 }
 
-async function resolveConnectionTestModelForAgent(
-  def: RuntimeAgentDef,
-  requestedModel: string | null,
-  env: NodeJS.ProcessEnv,
-  liveModelScope: string | null,
-  launchPath?: string | null,
-): Promise<string | null> {
-  const resolved = resolveModelForAgent(def, requestedModel, env, liveModelScope);
-  if (def.id !== 'amr' || resolved !== 'default' || !launchPath) return resolved;
-
-  try {
-    const cacheKey = buildAmrModelCacheKey({
-      launchPath,
-      env,
-      credentialRevision: readVelaCredentialRevision(env),
-    });
-    const catalog = await amrModelLoadingCache.get(cacheKey, {
-      fetchPreset: () => fetchVelaPresetModels(launchPath, env),
-      fetchRemote: () => fetchVelaRemoteModelsWithRetry(launchPath, env),
-    });
-    const liveModels = preferFreshLiveModels(
-      catalog.models ?? [],
-      getRememberedLiveModels(def.id, liveModelScope),
-    );
-    return resolveDefaultModelFromOptions(liveModels) ?? resolved;
-  } catch {
-    return resolved;
-  }
-}
-
 async function testAgentConnectionInternal(
   input: AgentConnectionInput,
 ): Promise<ConnectionTestResponse> {
@@ -2660,13 +2621,7 @@ async function testAgentConnectionInternal(
       ...baseEnv,
       ...(mmdRouteLaunchEnv || {}),
     }, executableResolution);
-    model = await resolveConnectionTestModelForAgent(
-      def,
-      model,
-      env,
-      liveModelScope,
-      executableResolution.launchPath,
-    ) ?? model;
+    model = resolveModelForAgent(def, model, env, liveModelScope) ?? model;
     const auth = await probeAgentAuthStatus(def, executableResolution.launchPath, env);
     if (auth?.status === 'missing') {
       // Preflight auth probe runs after binary resolution but before the
@@ -3148,6 +3103,17 @@ async function testAgentConnectionInternal(
 export async function testAgentConnection(
   input: AgentConnectionInput,
 ): Promise<ConnectionTestResponse> {
+  const inProcessDef = getAgentDef(input.agentId);
+  if (inProcessDef?.inProcess) {
+    // The Databricks agent spawns nothing: test the serving endpoint directly,
+    // as the requesting user when the route runs in their request scope.
+    return testDatabricksAgentConnection({
+      agentName: inProcessDef.name,
+      model: input.model ?? null,
+      userToken: getCurrentUserAccessToken(),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  }
   const primaryResult = await testAgentConnectionInternal(input);
   const validatedPrefs = validateAgentCliEnv(input.agentCliEnv);
   const configuredCodexBin = validatedPrefs?.codex?.CODEX_BIN?.trim() || '';

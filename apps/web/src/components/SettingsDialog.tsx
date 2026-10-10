@@ -4486,8 +4486,10 @@ export function SettingsDialog({
                 className="seg-control"
                 role="tablist"
                 aria-label={t('settings.modeAria')}
-                style={{ ['--seg-cols' as string]: 2 } as CSSProperties}
+                style={{ ['--seg-cols' as string]: 1 } as CSSProperties}
               >
+                {/* Databricks: the in-process Model Serving agent is the only
+                    execution mode; the BYOK ("API") tab is gone. */}
                 <button
                   type="button"
                   role="tab"
@@ -4510,19 +4512,6 @@ export function SettingsDialog({
                       ? t('settings.modeDaemonInstalledMeta', { count: installedCount })
                       : t('settings.modeDaemonOfflineMeta')}
                   </span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={cfg.mode === 'api'}
-                  className={
-                    'seg-btn seg-btn--inline' +
-                    (cfg.mode === 'api' ? ' active' : '')
-                  }
-                  onClick={() => setMode('api')}
-                >
-                  <span className="seg-title">{t('settings.modeApiMeta')}</span>
-                  <span className="seg-meta">{t('settings.modeApi')}</span>
                 </button>
               </div>
               </div>

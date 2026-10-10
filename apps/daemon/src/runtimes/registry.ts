@@ -1,4 +1,3 @@
-import { amrAgentDef } from './defs/amr.js';
 import { claudeAgentDef } from './defs/claude.js';
 import { codexAgentDef } from './defs/codex.js';
 import { devinAgentDef } from './defs/devin.js';
@@ -38,7 +37,6 @@ import type { RuntimeAgentDef } from './types.js';
  * (and their stream parsers) wholesale.
  */
 export const UNREGISTERED_CLI_AGENT_DEFS: RuntimeAgentDef[] = [
-  amrAgentDef,
   claudeAgentDef,
   codexAgentDef,
   devinAgentDef,

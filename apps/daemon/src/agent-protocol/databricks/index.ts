@@ -5,6 +5,7 @@
  */
 import { databricksHostOrigin } from '../../auth/databricks-obo.js';
 import {
+  DatabricksServingError,
   createDatabricksServingClient,
   defaultServingEndpoint,
   resolveServingCredential,
@@ -51,7 +52,7 @@ export interface AttachDatabricksAgentSessionOptions {
   executorEnv?: NodeJS.ProcessEnv;
   userToken: string | null;
   emit: (event: DatabricksHarnessEvent) => void;
-  /** Called once with the auth source actually used (never the token). */
+  /** Called with the auth source in use (never the token), once per change. */
   onCredentialSource?: (source: ServingCredentialSource | null) => void;
   fetch?: FetchLike;
   executor?: AgentExecutor;
@@ -80,6 +81,7 @@ export function attachDatabricksAgentSession(
   options: AttachDatabricksAgentSessionOptions,
 ): Promise<DatabricksAgentRunResult> {
   const env = options.env ?? process.env;
+  let reportedSource: ServingCredentialSource | null | undefined;
   const client = createDatabricksServingClient({
     hostOrigin: databricksHostOrigin(env),
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -89,7 +91,11 @@ export function attachDatabricksAgentSession(
         env,
         servicePrincipal: servicePrincipalFromEnv(env, options.fetch),
       });
-      options.onCredentialSource?.(credential?.source ?? null);
+      const source = credential?.source ?? null;
+      if (source !== reportedSource) {
+        reportedSource = source;
+        options.onCredentialSource?.(source);
+      }
       return credential;
     },
   });
@@ -120,3 +126,79 @@ export function attachDatabricksAgentSession(
   );
 }
 
+
+export interface DatabricksConnectionTestResult {
+  ok: boolean;
+  kind:
+    | 'success'
+    | 'auth_failed'
+    | 'forbidden'
+    | 'not_found_model'
+    | 'rate_limited'
+    | 'upstream_unavailable'
+    | 'agent_auth_required'
+    | 'unknown';
+  latencyMs: number;
+  model: string;
+  agentName: string;
+  sample?: string;
+  status?: number;
+  detail?: string;
+}
+
+/** Settings "Test connection" for the Databricks agent: one short, tool-less serving call. */
+export async function testDatabricksAgentConnection(options: {
+  agentName: string;
+  model: string | null;
+  userToken: string | null;
+  env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  fetch?: FetchLike;
+}): Promise<DatabricksConnectionTestResult> {
+  const env = options.env ?? process.env;
+  const endpoint = resolveServingEndpointForModel(options.model, env);
+  const startedAt = Date.now();
+  const base = { model: endpoint, agentName: options.agentName };
+  const client = createDatabricksServingClient({
+    hostOrigin: databricksHostOrigin(env),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    getCredential: () =>
+      resolveServingCredential({
+        userToken: options.userToken,
+        env,
+        servicePrincipal: servicePrincipalFromEnv(env, options.fetch),
+      }),
+  });
+  try {
+    let sample = '';
+    for await (const event of client.streamChat({
+      endpoint,
+      messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+      maxTokens: 16,
+      signal: options.signal ?? AbortSignal.timeout(30_000),
+    })) {
+      if (event.type === 'text') sample += event.delta;
+    }
+    return { ...base, ok: true, kind: 'success', latencyMs: Date.now() - startedAt, sample: sample.slice(0, 120) };
+  } catch (err) {
+    const latencyMs = Date.now() - startedAt;
+    const detail = (err as Error)?.message ?? String(err);
+    if (err instanceof DatabricksServingError) {
+      if (err.code === 'DATABRICKS_AUTH_REQUIRED' || err.code === 'DATABRICKS_HOST_MISSING') {
+        return { ...base, ok: false, kind: 'agent_auth_required', latencyMs, detail };
+      }
+      const status = err.status;
+      const kind = status === 401
+        ? 'auth_failed'
+        : status === 403
+          ? 'forbidden'
+          : status === 404
+            ? 'not_found_model'
+            : status === 429
+              ? 'rate_limited'
+              : 'upstream_unavailable';
+      return { ...base, ok: false, kind, latencyMs, detail, ...(status ? { status } : {}) };
+    }
+    return { ...base, ok: false, kind: 'unknown', latencyMs, detail };
+  }
+}

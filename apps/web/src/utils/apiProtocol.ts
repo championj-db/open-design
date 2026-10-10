@@ -1,4 +1,4 @@
-import { isOpenAICompatible } from '../providers/openai-compatible';
+import { isOpenAICompatible } from './legacyApiProtocol';
 import type { ApiProtocol, AppConfig } from '../types';
 import { API_PROTOCOL_AGENT_IDS } from './byokProvider';
 
