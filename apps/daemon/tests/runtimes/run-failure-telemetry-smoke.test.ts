@@ -11,6 +11,10 @@ import { classifyRunFailure } from '../../src/run-failure-classification.js';
 import { summarizeRunDiagnosticsForAnalytics } from '../../src/run-diagnostics.js';
 import { deriveRunErrorCode, runResultFromStatus } from '../../src/run-result.js';
 
+// The suite drives runs through the legacy CLI fakes; see the helper.
+vi.mock('../../src/runtimes/registry.js', async (importOriginal) =>
+  (await import('../helpers/legacy-cli-registry.js')).legacyCliRegistryMock(importOriginal as never));
+
 type StartedServer = {
   url: string;
   server: Server;
