@@ -151,6 +151,11 @@ export type RuntimeAgentDef = {
   id: string;
   name: string;
   bin: string;
+  // True for runtimes the daemon runs in its own process (the Databricks
+  // Model Serving agent): nothing is spawned, so detection skips the binary /
+  // version probes and the chat run drives an in-process handle instead of a
+  // child process. `bin` is then only a label.
+  inProcess?: boolean;
   versionArgs: string[];
   fallbackModels: RuntimeModelOption[];
   buildArgs: (

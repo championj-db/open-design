@@ -8,8 +8,9 @@
 // used for authorization.
 //
 // The gate fails closed: no token (and no explicit local-dev user) is a 401.
-// The token is never logged, persisted, or kept beyond the hash used as the
-// cache key.
+// The token is never logged or persisted; the identity cache keys on its hash,
+// and the request scope holds it in memory so Model Serving calls can run on
+// behalf of the user (`getCurrentUserAccessToken`).
 import { createHash } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { sendApiError } from '../http/api-errors.js';
@@ -234,7 +235,7 @@ export function createDatabricksAuthMiddleware(options: DatabricksAuthMiddleware
       );
     }
     options.resolver.resolve(token).then(
-      (user) => runWithCurrentUser(req, user, next),
+      (user) => runWithCurrentUser(req, user, next, token),
       (error: unknown) => {
         if (error instanceof DatabricksIdentityError) {
           if (error.status !== 401) console.warn(`[auth] ${error.code}: ${error.message}`);

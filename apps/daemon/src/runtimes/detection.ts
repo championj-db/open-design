@@ -570,6 +570,7 @@ async function probe(
   // Forget what a previous pass proved unusable before re-probing: a rescan
   // after the user repairs or reinstalls a CLI must not keep skipping it.
   forgetUnusableExecutables(def.id);
+  if (def.inProcess) return probeInProcessAgent(def, configuredEnv);
   // Detection must probe the exact path the runtime will spawn, not just the
   // PATH-visible shim. This is load-bearing for Codex under nvm/fnm/mise:
   // the discovered `codex` entry is often a `#!/usr/bin/env node` wrapper
@@ -784,6 +785,25 @@ async function probe(
           ),
         }
       : {}),
+    ...installMetaForAgent(def.id, configuredEnv),
+  };
+}
+
+// In-process runtimes have no binary to resolve or version to probe; they
+// are available whenever the daemon is, and their models come straight from
+// `fetchModels` (the Databricks agent lists Model Serving endpoints).
+async function probeInProcessAgent(
+  def: RuntimeAgentDef,
+  configuredEnv: Record<string, string>,
+): Promise<DetectedAgent> {
+  const env = { ...process.env, ...(def.env || {}), ...configuredEnv };
+  const modelResult = await fetchModels(def, def.bin, env);
+  return {
+    ...stripFns(def),
+    models: modelResult.models,
+    modelsSource: modelResult.source,
+    available: true,
+    version: null,
     ...installMetaForAgent(def.id, configuredEnv),
   };
 }

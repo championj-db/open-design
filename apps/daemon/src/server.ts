@@ -472,6 +472,14 @@ import { runAutoExtractionCleanup } from './memory-cleanup.js';
 import { attachAcpSession } from './agent-protocol/index.js';
 import { attachPiRpcSession } from './agent-protocol/index.js';
 import { attachDshProfileSession } from './agent-protocol/index.js';
+import {
+  DATABRICKS_STREAM_FORMAT,
+  attachDatabricksAgentSession,
+  bindRunUserToken,
+  createInProcessAgentChild,
+  runUserToken,
+} from './agent-protocol/databricks/index.js';
+import { getCurrentUserAccessToken } from './auth/current-user.js';
 import { stageAmrImagePaths } from './media/amr-image-staging.js';
 import { ingestRoutineConnectorEvolution } from './automation-routine-evolution.js';
 import { createClaudeStreamHandler } from './runtimes/claude-stream.js';
@@ -10749,6 +10757,10 @@ export async function startServer({
   };
 
   const startChatRun = async (chatBody, run) => {
+    // Capture the requesting user's OBO token (memory only) so the in-process
+    // Databricks agent calls Model Serving as that user, including on retries
+    // that run outside the original request scope.
+    bindRunUserToken(run, getCurrentUserAccessToken());
     const lifecycle = createRunLifecycleTracer(run);
     lifecycle.mark('chat_run_started');
     const pendingNativeSessionContinue =
@@ -14046,7 +14058,7 @@ export async function startServer({
     // pointing at /api/agents instead of silently falling back to
     // spawn(def.bin) — that fallback re-introduces the exact ENOENT symptom
     // from issue #10.
-    if (!resolvedBin || !agentLaunch.launchPath) {
+    if (!def.inProcess && (!resolvedBin || !agentLaunch.launchPath)) {
       cleanupPromptFile();
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
@@ -14276,12 +14288,16 @@ export async function startServer({
         return;
       }
       spawnedAgentEnv = env;
-      const invocation = createCommandInvocation({
-        command: agentLaunch.launchPath,
-        args,
-        env,
-      });
-      if (def.streamFormat === CODEX_APP_SERVER_STREAM_FORMAT) {
+      // In-process runtimes (the Databricks agent) spawn nothing; they get a
+      // ChildProcess-shaped handle below instead.
+      const invocation = def.inProcess
+        ? null
+        : createCommandInvocation({
+            command: agentLaunch.launchPath,
+            args,
+            env,
+          });
+      if (invocation && def.streamFormat === CODEX_APP_SERVER_STREAM_FORMAT) {
         codexCleanupInvocation = {
           command: invocation.command, args: [...invocation.args], env: { ...env }, cwd: effectiveCwd,
           ...(invocation.windowsVerbatimArguments !== undefined
@@ -14304,18 +14320,20 @@ export async function startServer({
       // framed stdin protocols (stream-json, JSON-RPC) keep the pipe. The
       // agent stays on record until its process group is gone, so a daemon
       // started after this one dies can reap it. See runtimes/agent-process.ts.
-      const spawnedAgent = spawnAgentProcess({
-        command: invocation.command,
-        args: invocation.args,
-        env,
-        cwd: effectiveCwd,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-        stdin: stdinMode === 'pipe' && runtimeReadsPlainTextPromptFromStdin(def)
-          ? { prompt: composed }
-          : stdinMode,
-        runDir: path.join(RUNTIME_DATA_DIR, 'runs', run.id),
-        runId: run.id,
-      });
+      const spawnedAgent = !invocation
+        ? { child: createInProcessAgentChild(), promptDeliveredAtSpawn: false, processGroupId: null }
+        : spawnAgentProcess({
+            command: invocation.command,
+            args: invocation.args,
+            env,
+            cwd: effectiveCwd,
+            windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+            stdin: stdinMode === 'pipe' && runtimeReadsPlainTextPromptFromStdin(def)
+              ? { prompt: composed }
+              : stdinMode,
+            runDir: path.join(RUNTIME_DATA_DIR, 'runs', run.id),
+            runId: run.id,
+          });
       child = spawnedAgent.child;
       promptDeliveredAtSpawn = spawnedAgent.promptDeliveredAtSpawn;
       lifecycle.mark('process_spawned');
@@ -15815,6 +15833,27 @@ export async function startServer({
           } else console.warn('[codex] closed-thread cleanup incomplete', details);
         }, codexEvidenceCollected);
       }
+    } else if (def.streamFormat === DATABRICKS_STREAM_FORMAT) {
+      // In-process Databricks Model Serving agent: the harness owns the model
+      // call and the tool loop and emits the common agent-event vocabulary
+      // straight into sendAgentEvent (errors included, so a failed serving
+      // call sets agentStreamError and the run closes as failed). It finishes
+      // the in-process `child`, which drives the shared close handler below.
+      trackingSubstantiveOutput = true;
+      void attachDatabricksAgentSession({
+        child,
+        prompt: composed,
+        cwd: effectiveCwd,
+        model: safeModel,
+        readableRoots: extraAllowedDirs,
+        env: process.env,
+        executorEnv: spawnedAgentEnv ?? undefined,
+        userToken: runUserToken(run),
+        emit: sendAgentEvent,
+        onCredentialSource: (source) => {
+          console.log(`[databricks] run=${run.id} model-serving auth=${source ?? 'none'}`);
+        },
+      });
     } else if (def.streamFormat === 'json-event-stream') {
       // Pipe through sendAgentEvent so the OpenCode `type:'error'` frame
       // (now emitted as a real error event by json-event-stream.ts after
