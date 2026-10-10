@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { createTestDatabase, tableExists } from '../helpers/test-db.js';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import {
   deleteMediaTask,
   getMediaTask,
@@ -13,16 +14,14 @@ import {
 import { createMediaTaskStore, TASK_TTL_AFTER_DONE_MS } from '../../src/media/task-store.js';
 import { resolveChatToolTokenTtlMs, ToolTokenRegistry } from '../../src/tool-tokens.js';
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'p1', 0, 0);
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p2', 'p2', 0, 0);
@@ -68,7 +67,7 @@ describe('media task persistence', () => {
     expect(getMediaTask(db, task.id)).toBeNull();
   });
 
-  let db: Database.Database;
+  let db: SqlDatabase;
 
   beforeEach(() => {
     db = freshDb();
@@ -79,10 +78,7 @@ describe('media task persistence', () => {
       migrateMediaTasks(db);
       migrateMediaTasks(db);
     }).not.toThrow();
-    const row = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='media_tasks'`)
-      .get() as { name: string } | undefined;
-    expect(row?.name).toBe('media_tasks');
+    expect(tableExists(db, 'media_tasks')).toBe(true);
   });
 
   it('round-trips task metadata and updates progress, file, and error fields', () => {
@@ -134,28 +130,28 @@ describe('media task persistence', () => {
   });
 
   it('adds and persists run ownership when upgrading the pre-run-id schema', () => {
-    const legacy = new Database(':memory:');
+    const legacy = createTestDatabase({ migrate: false });
     legacy.exec(`
       CREATE TABLE projects (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        id TEXT COLLATE "C" PRIMARY KEY,
+        name TEXT COLLATE "C" NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
       );
       INSERT INTO projects VALUES ('p1', 'p1', 0, 0);
       CREATE TABLE media_tasks (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        surface TEXT,
-        model TEXT,
-        progress_json TEXT NOT NULL DEFAULT '[]',
-        file_json TEXT,
-        error_json TEXT,
-        started_at INTEGER NOT NULL,
-        ended_at INTEGER,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        id TEXT COLLATE "C" PRIMARY KEY,
+        project_id TEXT COLLATE "C" NOT NULL,
+        status TEXT COLLATE "C" NOT NULL,
+        surface TEXT COLLATE "C",
+        model TEXT COLLATE "C",
+        progress_json TEXT COLLATE "C" NOT NULL DEFAULT '[]',
+        file_json TEXT COLLATE "C",
+        error_json TEXT COLLATE "C",
+        started_at BIGINT NOT NULL,
+        ended_at BIGINT,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
       );
     `);
     migrateMediaTasks(legacy);

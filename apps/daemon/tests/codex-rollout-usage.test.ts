@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from '../src/storage/local-sqlite.js';
 
 import {
   codexSessionIdFromRunEvents,
@@ -179,7 +179,7 @@ describe('readCodexRolloutFirstCall', () => {
       // Codex archives into one flat directory, while its native primary-key
       // index resolves a known thread without scanning other conversations.
       for (let i = 0; i < 2_049; i += 1) writeFileSync(path.join(archive, `unrelated-${i}`), '');
-      const db = new Database(path.join(home, 'state_5.sqlite'));
+      const db = new LocalSqliteDatabase(path.join(home, 'state_5.sqlite'));
       try {
         db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, archived INTEGER NOT NULL)');
         db.prepare('INSERT INTO threads VALUES (?, ?, 1)').run(sid, archivedPath);
@@ -211,7 +211,7 @@ describe('readCodexRolloutFirstCall', () => {
           chmodSync(indexedPath, 0o666);
         }
         for (let i = 0; i < 2_049; i += 1) writeFileSync(path.join(archive, `unrelated-${i}`), '');
-        const db = new Database(path.join(home, 'state_5.sqlite'));
+        const db = new LocalSqliteDatabase(path.join(home, 'state_5.sqlite'));
         try {
           db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, archived INTEGER NOT NULL)');
           db.prepare('INSERT INTO threads VALUES (?, ?, 1)').run(sid, indexedPath);

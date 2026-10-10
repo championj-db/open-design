@@ -22,9 +22,9 @@ import {
 } from '../src/db.js';
 import { listLibraryAssets } from '../src/library-store.js';
 import { reconcileLibrary } from '../src/library-sync.js';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let dataDir: string;
 let projectsDir: string;
 let designSystemsDir: string;

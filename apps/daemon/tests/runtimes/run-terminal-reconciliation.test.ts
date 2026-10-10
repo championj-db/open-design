@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { reconcileDurableRunTerminals } from '../../src/runtimes/run-terminal-reconciliation.js';
@@ -10,17 +11,17 @@ import { createChatRunService } from '../../src/runtimes/runs.js';
 
 describe('durable run terminal reconciliation', () => {
   let tmpDir: string;
-  let db: Database.Database;
+  let db: SqlDatabase;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-run-reconcile-test-'));
-    db = new Database(':memory:');
+    db = createTestDatabase({ migrate: false });
     db.exec(`
       CREATE TABLE messages (
         id TEXT PRIMARY KEY,
         run_id TEXT,
         run_status TEXT,
-        ended_at INTEGER,
+        ended_at BIGINT,
         events_json TEXT
       )
     `);
@@ -520,9 +521,9 @@ describe('durable run terminal reconciliation', () => {
       },
       langfuseCompletedAt: 2_000,
     }));
-    const storageDb = new Database(':memory:');
+    const storageDb = createTestDatabase({ migrate: false });
     storageDb.exec(`CREATE TABLE messages (
-      id TEXT PRIMARY KEY, run_id TEXT, run_status TEXT, ended_at INTEGER, content TEXT NOT NULL DEFAULT '', events_json TEXT)`);
+      id TEXT PRIMARY KEY, run_id TEXT, run_status TEXT, ended_at BIGINT, content TEXT NOT NULL DEFAULT '', events_json TEXT)`);
     storageDb.prepare(
       `INSERT INTO messages (id, run_id, run_status, content, events_json) VALUES ('m-storage', ?, 'failed', 'partial', '[]')`,
     ).run(runId);

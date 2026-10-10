@@ -25,7 +25,8 @@
  */
 
 import type http from 'node:http';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -38,10 +39,10 @@ import { startServer } from '../src/server.js';
 import { associateLateRunProducedFile } from '../src/runtimes/run-produced-files.js';
 
 /** Open the running server's own database, the way the neighbouring suite does. */
-async function withDb<T>(fn: (db: Database.Database) => T | Promise<T>): Promise<T> {
+async function withDb<T>(fn: (db: SqlDatabase) => T | Promise<T>): Promise<T> {
   const dir = process.env.OD_DATA_DIR;
   if (!dir) throw new Error('OD_DATA_DIR is required for this suite');
-  const db = new Database(resolve(dir, 'app.sqlite'));
+  const db = openDataDirDatabase(dir);
   try {
     return await fn(db);
   } finally {

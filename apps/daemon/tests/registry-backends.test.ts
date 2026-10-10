@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
 import type { MarketplaceManifest } from '@open-design/contracts';
 import { StaticRegistryBackend } from '../src/registry/static-backend.js';
 import {
@@ -59,7 +59,7 @@ describe('registry backends', () => {
   });
 
   it('keeps database backend behavior equivalent to static backend', async () => {
-    const db = new Database(':memory:');
+    const db = createTestDatabase({ migrate: false });
     try {
       ensureRegistryTables(db);
       const staticBackend = new StaticRegistryBackend({

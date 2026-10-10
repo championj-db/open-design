@@ -24,7 +24,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import type { AppliedPluginSnapshot, PipelineStage } from '@open-design/contracts';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
@@ -41,12 +42,12 @@ import {
   resetBuiltInAtomWorkersForTests,
 } from '../src/plugins/atoms/built-ins.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), 'od-atom-reg-'));
-  db = new Database(path.join(tmpDir, 'test.sqlite'));
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

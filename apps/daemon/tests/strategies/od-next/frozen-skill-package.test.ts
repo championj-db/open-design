@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, symlink, writeFile, mkdir } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../../helpers/test-db.js';
+import type { SqlDatabase } from '../../../src/storage/postgres/sql-database.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { SkillInfo } from '../../../src/skills.js';
@@ -50,9 +51,8 @@ async function fixtureSkill(id = 'frontend-design'): Promise<SkillInfo> {
   } as SkillInfo;
 }
 
-function packageDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
+function packageDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec('CREATE TABLE strategy_task_executions (task_execution_id TEXT PRIMARY KEY);');
   migrateFrozenSkillPackageStore(db);
   db.prepare('INSERT INTO strategy_task_executions (task_execution_id) VALUES (?)').run('task-1');

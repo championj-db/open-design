@@ -15,7 +15,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { startServer } from '../src/server.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import { defaultRegistryRoots, upsertInstalledPlugin } from '../src/plugins/registry.js';
@@ -102,7 +101,6 @@ beforeAll(async () => {
   await writeFile(path.join(installedRoot, 'payload.bin'), 'not a text asset');
   void migratePlugins;
   void upsertInstalledPlugin;
-  void Database;
 });
 
 afterAll(async () => {

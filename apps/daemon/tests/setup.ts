@@ -44,6 +44,11 @@ if (!globalState[TEST_DATA_DIR_SYMBOL]) {
 // process to use one isolated data directory before any test imports server.ts,
 // so tests can never read or overwrite the developer's real repo `.od` data.
 process.env.OD_DATA_DIR = globalState[TEST_DATA_DIR_SYMBOL];
+// The relational store is Postgres (DATABASE_URL / PG* env, provisioned by
+// tests/global-setup-postgres.ts when unset). Give every daemon data root its
+// own schema so fixtures that open separate data dirs stay isolated, and a
+// test that reopens a data dir sees the rows it wrote.
+process.env.OD_PG_SCHEMA_PER_DATA_DIR ??= '1';
 // Keep unit tests from reading a developer's stored Vela profile and routing
 // Langfuse-shaped telemetry through the authenticated Vela sink by accident.
 process.env.OPEN_DESIGN_VELA_TELEMETRY ??= 'off';

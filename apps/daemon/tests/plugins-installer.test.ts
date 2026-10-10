@@ -8,7 +8,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
   classifyPluginInstallError,
@@ -23,7 +24,7 @@ import type { InstalledPluginRecord } from '@open-design/contracts';
 let tmpRoot: string;
 let pluginsRoot: string;
 let sourceFolder: string;
-let db: Database.Database;
+let db: SqlDatabase;
 
 beforeEach(async () => {
   tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'od-installer-'));
@@ -44,7 +45,7 @@ beforeEach(async () => {
       },
     }, null, 2),
   );
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

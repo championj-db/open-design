@@ -11,7 +11,7 @@ import {
   type OpenDesignPlanContractV2,
 } from '@open-design/contracts';
 import { strategyPackageHashFromDigests } from '@open-design/plugin-runtime';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../../src/storage/postgres/sql-database.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeDatabase, openDatabase } from '../../../src/db.js';
@@ -81,7 +81,7 @@ function strategyBinding() {
   };
 }
 
-function createStrategySnapshot(db: Database.Database): AppliedPluginSnapshot {
+function createStrategySnapshot(db: SqlDatabase): AppliedPluginSnapshot {
   return createSnapshot(db, {
     projectId: 'project-1',
     conversationId: 'conversation-1',
@@ -300,7 +300,7 @@ function parsedCompletion() {
 
 describe('OD Next complex production enforcement', () => {
   let tempDir: string;
-  let db: Database.Database;
+  let db: SqlDatabase;
   let snapshot: AppliedPluginSnapshot;
 
   beforeEach(() => {

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cp, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
   getInstalledPlugin,
@@ -19,7 +20,7 @@ import {
   InternalBundledStrategyApplyError,
 } from '../src/plugins/apply.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpRoot: string;
 
 const SAMPLE_MANIFEST = (id: string) =>
@@ -37,7 +38,7 @@ const SAMPLE_SKILL = (id: string) => `---\nname: ${id}\ndescription: bundled fix
 
 beforeEach(async () => {
   tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'od-bundled-'));
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

@@ -87,6 +87,7 @@ vi.mock('node:crypto', async (importOriginal) => {
 });
 
 import { closeDatabase, openDatabase } from '../src/db.js';
+import { createAbortTrigger, dropRowTrigger } from './helpers/test-db.js';
 import { AGENT_DEFS } from '../src/runtimes/registry.js';
 import { agentBinEnvKey } from '../src/runtimes/executables.js';
 import { execAgentFile } from '../src/runtimes/invocation.js';
@@ -642,13 +643,11 @@ process.exit(127);
     );
     process.env.OD_NEXT_STRATEGY_ROLLOUT = 'active';
     process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
-    database().exec(`
-      CREATE TRIGGER reject_selected_example_strategy_task
-      BEFORE INSERT ON strategy_task_executions
-      BEGIN
-        SELECT RAISE(ABORT, 'fixture selected-example strategy preparation rejected');
-      END
-    `);
+    createAbortTrigger(database(), {
+      name: 'reject_selected_example_strategy_task',
+      event: 'BEFORE INSERT ON strategy_task_executions',
+      message: 'fixture selected-example strategy preparation rejected',
+    });
     try {
       const fallback = await postRun(started.url, publicRunRequest(
         prestartFallbackProject,
@@ -660,7 +659,7 @@ process.exit(127);
       await waitForRunTerminal(started.url, fallback.runId as string);
       expectRunScopedExample(prestartFallbackProject, fallback);
     } finally {
-      database().exec('DROP TRIGGER IF EXISTS reject_selected_example_strategy_task');
+      dropRowTrigger(database(), 'reject_selected_example_strategy_task', 'strategy_task_executions');
     }
 
     const invocations = await readProjectInvocations(fixture.logPath, rolloutOffProject.projectId);
@@ -760,13 +759,11 @@ process.exit(127);
 
     process.env.OD_NEXT_STRATEGY_ROLLOUT = 'active';
     process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
-    database().exec(`
-      CREATE TRIGGER reject_stale_example_strategy_task
-      BEFORE INSERT ON strategy_task_executions
-      BEGIN
-        SELECT RAISE(ABORT, 'fixture stale-example strategy preparation rejected');
-      END
-    `);
+    createAbortTrigger(database(), {
+      name: 'reject_stale_example_strategy_task',
+      event: 'BEFORE INSERT ON strategy_task_executions',
+      message: 'fixture stale-example strategy preparation rejected',
+    });
     try {
       const fallback = await postRun(started.url, publicRunRequest(
         prestartFallbackProject,
@@ -777,7 +774,7 @@ process.exit(127);
       expect(fallback.taskExecutionId).toBeUndefined();
       await expectDefaultWasNotReused(prestartFallbackProject, fallback);
     } finally {
-      database().exec('DROP TRIGGER IF EXISTS reject_stale_example_strategy_task');
+      dropRowTrigger(database(), 'reject_stale_example_strategy_task', 'strategy_task_executions');
     }
   });
 
@@ -916,13 +913,11 @@ process.exit(127);
     const strategyTaskCountAtStart = (database().prepare(
       'SELECT COUNT(*) AS count FROM strategy_task_executions',
     ).get() as { count: number }).count;
-    database().exec(`
-      CREATE TRIGGER reject_automatic_strategy_task
-      BEFORE INSERT ON strategy_task_executions
-      BEGIN
-        SELECT RAISE(ABORT, 'fixture automatic task preparation rejected');
-      END
-    `);
+    createAbortTrigger(database(), {
+      name: 'reject_automatic_strategy_task',
+      event: 'BEFORE INSERT ON strategy_task_executions',
+      message: 'fixture automatic task preparation rejected',
+    });
 
     try {
       const created = await postRun(
@@ -953,7 +948,7 @@ process.exit(127);
       expect(invocations[0]?.stdin).toContain('Run once after the automatic pre-claim rollback.');
       expect(invocations[0]?.stdin).not.toContain('OD Next Strategy V2');
     } finally {
-      database().exec('DROP TRIGGER IF EXISTS reject_automatic_strategy_task');
+      dropRowTrigger(database(), 'reject_automatic_strategy_task', 'strategy_task_executions');
     }
   });
 

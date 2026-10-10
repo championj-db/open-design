@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
 
 import {
   runVelaCommand,
@@ -81,7 +81,7 @@ describe('canonical Vela terminal command integration', () => {
         },
       }),
     );
-    const db = new Database(':memory:');
+    const db = createTestDatabase({ migrate: false });
     try {
       migrateAmrTerminalReportOutbox(db);
       const store = createAmrTerminalReportOutboxStore(db);

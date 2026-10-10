@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 
 /**
  * Every row a database read hands to JS while `run` executes, serialized at
@@ -15,7 +15,7 @@ export interface CapturedRead {
   payload: string;
 }
 
-function instrument(db: Database.Database, reads: CapturedRead[]): () => void {
+function instrument(db: SqlDatabase, reads: CapturedRead[]): () => void {
   const original = db.prepare.bind(db);
   (db as { prepare: typeof db.prepare }).prepare = ((source: string) => {
     const statement = original(source);
@@ -42,7 +42,7 @@ function instrument(db: Database.Database, reads: CapturedRead[]): () => void {
 }
 
 export function captureDbReads<T>(
-  db: Database.Database,
+  db: SqlDatabase,
   run: () => T,
 ): { result: T; reads: CapturedRead[] } {
   const reads: CapturedRead[] = [];
@@ -55,7 +55,7 @@ export function captureDbReads<T>(
 }
 
 export async function captureDbReadsAsync<T>(
-  db: Database.Database,
+  db: SqlDatabase,
   run: () => Promise<T>,
 ): Promise<{ result: T; reads: CapturedRead[] }> {
   const reads: CapturedRead[] = [];

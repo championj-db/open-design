@@ -1,4 +1,4 @@
-// Phase 5 / spec §15.6 — ProjectStorage + DaemonDb adapter tests.
+// Phase 5 / spec §15.6 — ProjectStorage + daemon DB connection config tests.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -13,6 +13,8 @@ import {
 import {
   DaemonDbConfigError,
   resolveDaemonDbConfig,
+  resolveDaemonDbConfigForDataDir,
+  schemaForDataDir,
 } from '../src/storage/daemon-db.js';
 
 let tmp: string;
@@ -268,36 +270,102 @@ describe('resolveProjectStorage', () => {
 });
 
 describe('resolveDaemonDbConfig', () => {
-  it('defaults to sqlite', () => {
-    expect(resolveDaemonDbConfig({})).toEqual({ kind: 'sqlite' });
+  it('throws a configuration error when no database env is set', () => {
+    expect(() => resolveDaemonDbConfig({})).toThrow(DaemonDbConfigError);
   });
 
-  it('parses postgres env vars when OD_DAEMON_DB=postgres', () => {
+  it('uses DATABASE_URL as-is for local Postgres', () => {
+    expect(resolveDaemonDbConfig({ DATABASE_URL: 'postgres://od@127.0.0.1:5432/od' })).toEqual({
+      kind: 'url',
+      connectionString: 'postgres://od@127.0.0.1:5432/od',
+      schema: null,
+      lockTimeoutMs: 5000,
+    });
+  });
+
+  it('parses plain PG* env with a static password', () => {
     const cfg = resolveDaemonDbConfig({
-      OD_DAEMON_DB: 'postgres',
-      OD_PG_HOST:   'pg.local',
-      OD_PG_PORT:   '6543',
-      OD_PG_DATABASE: 'open_design',
-      OD_PG_USER:   'od',
-      OD_PG_SSL_MODE: 'disable',
+      PGHOST: 'pg.local',
+      PGPORT: '6543',
+      PGDATABASE: 'open_design',
+      PGUSER: 'od',
+      PGPASSWORD: 'secret',
+      OD_PG_SCHEMA: 'od_app',
+      OD_PG_LOCK_TIMEOUT_MS: '250',
     });
-    expect(cfg.kind).toBe('postgres');
-    expect(cfg.postgres).toEqual({
-      host:     'pg.local',
-      port:     6543,
+    expect(cfg).toEqual({
+      kind: 'postgres',
+      host: 'pg.local',
+      port: 6543,
       database: 'open_design',
-      user:     'od',
-      sslMode:  'disable',
+      user: 'od',
+      password: 'secret',
+      sslMode: 'disable',
+      schema: 'od_app',
+      lockTimeoutMs: 250,
     });
   });
 
-  it('throws when postgres env vars are incomplete', () => {
+  it('selects Lakebase when LAKEBASE_ENDPOINT is set, with TLS and Lakebase defaults', () => {
+    const cfg = resolveDaemonDbConfig({
+      LAKEBASE_ENDPOINT: 'projects/p/branches/main/endpoints/ep',
+      PGHOST: 'ep-x.database.cloud.databricks.com',
+      DATABRICKS_HOST: 'adb-1.azuredatabricks.net',
+      DATABRICKS_CLIENT_ID: 'sp-guid',
+      DATABRICKS_CLIENT_SECRET: 'sp-secret',
+      PGPASSWORD: 'ignored-for-lakebase',
+    });
+    expect(cfg.kind).toBe('lakebase');
+    expect(cfg).toMatchObject({
+      host: 'ep-x.database.cloud.databricks.com',
+      port: 5432,
+      database: 'databricks_postgres',
+      user: 'sp-guid',
+      sslMode: 'require',
+      schema: null,
+    });
+    expect(cfg.password).toBeUndefined();
+    expect(cfg.lakebase).toEqual({
+      source: 'rest',
+      endpoint: 'projects/p/branches/main/endpoints/ep',
+      workspaceHost: 'adb-1.azuredatabricks.net',
+      workspaceToken: null,
+      clientId: 'sp-guid',
+      clientSecret: 'sp-secret',
+      cliPath: 'databricks',
+      cliProfile: null,
+    });
+  });
+
+  it('falls back to CLI credential minting without a workspace host', () => {
+    const cfg = resolveDaemonDbConfig({
+      LAKEBASE_ENDPOINT: 'projects/p/branches/main/endpoints/ep',
+      LAKEBASE_HOST: 'ep-x.example',
+      LAKEBASE_USER: 'someone@example.com',
+    });
+    expect(cfg.lakebase?.source).toBe('cli');
+    expect(cfg.user).toBe('someone@example.com');
+  });
+
+  it('throws when Lakebase is selected without host or user', () => {
     expect(() =>
-      resolveDaemonDbConfig({ OD_DAEMON_DB: 'postgres', OD_PG_HOST: 'pg.local' }),
+      resolveDaemonDbConfig({ LAKEBASE_ENDPOINT: 'projects/p/branches/b/endpoints/e' }),
     ).toThrow(DaemonDbConfigError);
   });
 
-  it('throws on an unknown OD_DAEMON_DB value', () => {
-    expect(() => resolveDaemonDbConfig({ OD_DAEMON_DB: 'mongo' })).toThrow(DaemonDbConfigError);
+  it('rejects unsafe schema names and unknown sslmodes', () => {
+    expect(() => resolveDaemonDbConfig({ DATABASE_URL: 'postgres://x/y', OD_PG_SCHEMA: 'a;drop' }))
+      .toThrow(DaemonDbConfigError);
+    expect(() => resolveDaemonDbConfig({ PGHOST: 'h', PGSSLMODE: 'bogus' })).toThrow(DaemonDbConfigError);
+  });
+
+  it('derives a stable per-data-dir schema when OD_PG_SCHEMA_PER_DATA_DIR=1', () => {
+    const env = { DATABASE_URL: 'postgres://x/y', OD_PG_SCHEMA_PER_DATA_DIR: '1' };
+    const a = resolveDaemonDbConfigForDataDir('/tmp/od-a', env);
+    expect(a.schema).toBe(schemaForDataDir('/tmp/od-a'));
+    expect(a.schema).toMatch(/^od_[0-9a-f]{24}$/);
+    expect(resolveDaemonDbConfigForDataDir('/tmp/od-a/', env).schema).toBe(a.schema);
+    expect(resolveDaemonDbConfigForDataDir('/tmp/od-b', env).schema).not.toBe(a.schema);
+    expect(resolveDaemonDbConfigForDataDir('/tmp/od-a', { DATABASE_URL: 'postgres://x/y' }).schema).toBeNull();
   });
 });

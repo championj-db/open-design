@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,18 +9,18 @@ import {
 } from '../src/plugins/scenario-binding.js';
 
 function fixtureDb() {
-  const db = new Database(':memory:');
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      metadata_json TEXT,
-      applied_plugin_snapshot_id TEXT
+      id TEXT COLLATE "C" PRIMARY KEY,
+      metadata_json TEXT COLLATE "C",
+      applied_plugin_snapshot_id TEXT COLLATE "C"
     );
     CREATE TABLE applied_plugin_snapshots (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      plugin_id TEXT,
-      applied_at INTEGER
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C",
+      plugin_id TEXT COLLATE "C",
+      applied_at BIGINT
     );
   `);
   return db;

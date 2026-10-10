@@ -14,7 +14,8 @@ import {
   type AppliedPluginSnapshot,
   type OpenDesignPlanContractV2,
 } from '@open-design/contracts';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDatabase, openDatabase } from '../../src/db.js';
@@ -90,7 +91,7 @@ function finalTextColumns(text: string) {
  * reads dispatch on the stored version -- never a tamper signal.
  */
 function persistBundleAs(
-  db: Database.Database,
+  db: SqlDatabase,
   taskExecutionId: string,
   schema: string,
   text: string,
@@ -117,7 +118,7 @@ type TestTransitionInput = Omit<CompareAndTransitionStrategyTaskInput, 'nextRun'
 };
 
 function compareAndTransitionStrategyTaskExecution(
-  db: Database.Database,
+  db: SqlDatabase,
   input: TestTransitionInput,
 ) {
   const current = getStrategyTaskExecution(db, input.taskExecutionId);
@@ -163,7 +164,7 @@ function strategyBinding() {
   };
 }
 
-function createStrategySnapshot(db: Database.Database): AppliedPluginSnapshot {
+function createStrategySnapshot(db: SqlDatabase): AppliedPluginSnapshot {
   return createSnapshot(db, {
     projectId: 'project-1',
     conversationId: 'conversation-1',
@@ -238,7 +239,7 @@ function planContract(snapshot: AppliedPluginSnapshot): OpenDesignPlanContractV2
   };
 }
 
-function seedParents(db: Database.Database): AppliedPluginSnapshot {
+function seedParents(db: SqlDatabase): AppliedPluginSnapshot {
   db.prepare(
     `INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
   ).run('project-1', 'Project 1', 1, 1);
@@ -250,7 +251,7 @@ function seedParents(db: Database.Database): AppliedPluginSnapshot {
 }
 
 function createTask(
-  db: Database.Database,
+  db: SqlDatabase,
   snapshot: AppliedPluginSnapshot,
   runId = 'run-request',
   taskExecutionId = 'task-1',
@@ -269,7 +270,7 @@ function createTask(
 
 describe('durable strategy task store', () => {
   let tempDir: string;
-  let db: Database.Database;
+  let db: SqlDatabase;
   let snapshot: AppliedPluginSnapshot;
 
   beforeEach(() => {
@@ -479,7 +480,12 @@ describe('durable strategy task store', () => {
   });
 
   it('adds nullable/versioned tables without changing ordinary Run queries', () => {
-    const columns = db.prepare('PRAGMA table_info(strategy_task_executions)').all() as Array<{
+    const columns = db.prepare(
+      `SELECT column_name AS name, CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull
+         FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'strategy_task_executions'
+        ORDER BY ordinal_position`,
+    ).all() as Array<{
       name: string;
       notnull: number;
     }>;
@@ -493,10 +499,12 @@ describe('durable strategy task store', () => {
     expect(getStrategyTaskExecution(db, 'ordinary-run')).toBeNull();
     expect(getStrategyTaskExecutionByRunId(db, 'ordinary-run')).toBeNull();
 
-    const legacy = new Database(':memory:');
+    const legacy = createTestDatabase({ migrate: false });
     legacy.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY);
-      CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT);
+      CREATE TABLE projects (id TEXT COLLATE "C" PRIMARY KEY);
+      CREATE TABLE conversations (id TEXT COLLATE "C" PRIMARY KEY, project_id TEXT COLLATE "C");
+      -- Postgres resolves FK targets at CREATE TABLE time (SQLite defers to DML).
+      CREATE TABLE applied_plugin_snapshots (id TEXT COLLATE "C" PRIMARY KEY);
       INSERT INTO projects (id) VALUES ('legacy-project');
       INSERT INTO conversations (id, project_id) VALUES ('legacy-conversation', 'legacy-project');
     `);

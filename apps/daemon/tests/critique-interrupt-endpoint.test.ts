@@ -10,7 +10,8 @@
 import http from 'node:http';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import {
   getCritiqueRun,
   insertCritiqueRun,
@@ -24,22 +25,20 @@ import { handleCritiqueInterrupt } from '../src/critique/interrupt-handler.js';
 // Test infrastructure
 // ---------------------------------------------------------------------------
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'Project 1', 0, 0);
@@ -50,7 +49,7 @@ function freshDb(): Database.Database {
 }
 
 function startMiniServer(
-  db: Database.Database,
+  db: SqlDatabase,
   registry: ReturnType<typeof createRunRegistry>,
 ): Promise<{ baseUrl: string; server: http.Server }> {
   const app = express();
@@ -87,7 +86,7 @@ async function post(url: string, body?: unknown): Promise<{ status: number; json
 // ---------------------------------------------------------------------------
 
 describe('POST /api/projects/:projectId/critique/:runId/interrupt', () => {
-  let db: Database.Database;
+  let db: SqlDatabase;
   let registry: ReturnType<typeof createRunRegistry>;
   let baseUrl: string;
   let server: http.Server;

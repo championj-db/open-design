@@ -1,4 +1,5 @@
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -24,16 +25,14 @@ function stubProviderDisabled(model: string): Error {
  * `code` / `subject` / `retryable` already do: the failure → the persisted
  * task, and SQLite → the snapshot the agent and the chat host read back.
  */
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('project-1', 'p', 0, 0);
   `);

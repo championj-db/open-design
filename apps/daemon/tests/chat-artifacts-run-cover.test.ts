@@ -16,7 +16,8 @@
  */
 
 import type http from 'node:http';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -161,8 +162,8 @@ function dataDir(): string {
   return dir;
 }
 
-function withDb<T>(fn: (db: Database.Database) => T): T {
-  const db = new Database(resolve(dataDir(), 'app.sqlite'));
+function withDb<T>(fn: (db: SqlDatabase) => T): T {
+  const db = openDataDirDatabase(dataDir());
   try {
     return fn(db);
   } finally {

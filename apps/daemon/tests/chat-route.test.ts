@@ -1,5 +1,5 @@
 import type http from 'node:http';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -122,7 +122,7 @@ describe('/api/chat', () => {
     });
     expect(createProjectResponse.ok).toBe(true);
 
-    const sqlite = new Database(resolve(process.env.OD_DATA_DIR, 'app.sqlite'));
+    const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR);
     try {
       ensureWorkspaceProject(sqlite as never, {
         projectId,
@@ -1065,7 +1065,7 @@ process.stdin.on('end', () => {
     expect(conversationId).toBeTruthy();
 
     const dbFile = resolve(process.env.OD_DATA_DIR, 'app.sqlite');
-    const sqlite = new Database(dbFile);
+    const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR as string);
     try {
       upsertMessage(sqlite as never, conversationId!, {
         id: assistantMessageId,
@@ -1108,7 +1108,7 @@ process.stdin.on('end', () => {
       },
     );
 
-    const verifyDb = new Database(dbFile, { readonly: true });
+    const verifyDb = openDataDirDatabase(process.env.OD_DATA_DIR as string);
     try {
       const rows = verifyDb
         .prepare(`SELECT id, content, run_id FROM messages WHERE conversation_id = ? AND role = 'assistant'`)
@@ -1162,7 +1162,7 @@ process.stdin.on('end', () => {
     const dbFile = resolve(process.env.OD_DATA_DIR, 'app.sqlite');
     let lastStatus: string | null = null;
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const sqlite = new Database(dbFile, { readonly: true });
+      const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR as string);
       try {
         const row = sqlite
           .prepare(`SELECT run_status FROM messages WHERE id = ?`)
@@ -3833,7 +3833,7 @@ process.stdin.on('end', () => {
 
           // The latch is persisted on the conversation row.
           const dbFile = resolve(process.env.OD_DATA_DIR as string, 'app.sqlite');
-          const sqlite = new Database(dbFile, { readonly: true });
+          const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR as string);
           try {
             const row = sqlite
               .prepare(`SELECT intent_signals_json AS intentSignalsJson FROM conversations WHERE id = ?`)
@@ -3959,7 +3959,7 @@ process.stdin.on('end', () => {
       'utf8',
     );
 
-    const sqlite = new Database(resolve(process.env.OD_DATA_DIR, 'app.sqlite'));
+    const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR);
     try {
       ensureWorkspaceResource(
         sqlite as never,
@@ -4049,7 +4049,7 @@ process.stdin.on('end', () => {
       'utf8',
     );
 
-    const sqlite = new Database(resolve(process.env.OD_DATA_DIR, 'app.sqlite'));
+    const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR);
     try {
       ensureWorkspaceResource(
         sqlite as never,
@@ -4205,7 +4205,7 @@ process.stdin.on('end', () => {
       'utf8',
     );
 
-    const sqlite = new Database(resolve(process.env.OD_DATA_DIR, 'app.sqlite'));
+    const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR);
     let personalBackingProjectBefore: ReturnType<typeof getProject>;
     let projectCountBefore = 0;
     try {
@@ -4291,9 +4291,7 @@ process.stdin.on('end', () => {
           });
           const body = await response.text();
 
-          const verificationDb = new Database(
-            resolve(process.env.OD_DATA_DIR as string, 'app.sqlite'),
-          );
+          const verificationDb = openDataDirDatabase(process.env.OD_DATA_DIR as string);
           try {
             expect.soft(
               getProject(verificationDb as never, personalBackingProjectId),

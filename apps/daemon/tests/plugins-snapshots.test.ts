@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
   createSnapshot,
@@ -25,12 +26,12 @@ import {
 } from '../src/plugins/snapshots.js';
 import { strategyPackageHashFromDigests } from '@open-design/plugin-runtime';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), 'od-snapshot-'));
-  db = new Database(path.join(tmpDir, 'test.sqlite'));
+  db = createTestDatabase({ migrate: false });
   // Minimal projects/conversations tables so the FK ON DELETE clauses
   // don't blow up the migration.
   db.exec(`
@@ -106,7 +107,13 @@ function strategySnapshotInput(
 
 describe('snapshots writer', () => {
   it('adds strategy_json as a nullable reader-first migration column', () => {
-    const columns = db.prepare('PRAGMA table_info(applied_plugin_snapshots)').all() as Array<{
+    const columns = db.prepare(
+      `SELECT column_name AS name,
+              CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull,
+              column_default AS dflt_value
+         FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = ?`,
+    ).all('applied_plugin_snapshots') as Array<{
       name: string;
       notnull: number;
       dflt_value: unknown;
@@ -117,18 +124,18 @@ describe('snapshots writer', () => {
   });
 
   it('migrates an existing snapshot row additively before enabling the writer', () => {
-    const legacy = new Database(':memory:');
+    const legacy = createTestDatabase({ migrate: false });
     try {
       legacy.exec(`
         CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);
         CREATE TABLE applied_plugin_snapshots (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          run_id TEXT,
-          plugin_id TEXT NOT NULL,
-          plugin_spec_version TEXT NOT NULL DEFAULT '1.0.0',
-          plugin_version TEXT NOT NULL
+          id TEXT COLLATE "C" PRIMARY KEY,
+          project_id TEXT COLLATE "C" NOT NULL,
+          run_id TEXT COLLATE "C",
+          plugin_id TEXT COLLATE "C" NOT NULL,
+          plugin_spec_version TEXT COLLATE "C" NOT NULL DEFAULT '1.0.0',
+          plugin_version TEXT COLLATE "C" NOT NULL
         );
         INSERT INTO applied_plugin_snapshots (
           id, project_id, run_id, plugin_id, plugin_version

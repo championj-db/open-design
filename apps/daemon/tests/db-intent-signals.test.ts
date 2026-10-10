@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -83,7 +83,7 @@ describe('conversation intent-signal latch', () => {
 
     // Second, independent connection (stand-in for another writer): latching
     // media must observe and keep the deck bit persisted by the first.
-    const second = new Database(path.join(tempDir, 'app.sqlite'));
+    const second = openDataDirDatabase(tempDir);
     try {
       const merged = latchConversationIntentSignals(second as never, 'conv-1', { deck: false, media: true, platform: false, devicePlatform: null });
       expect(merged).toEqual({ deck: true, media: true, platform: false, devicePlatform: null });

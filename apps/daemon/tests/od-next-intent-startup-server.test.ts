@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { Agent, fetch } from 'undici';
 import { afterEach, expect, it, vi } from 'vitest';
 import { composeOdNextStrategyBundleHeadV2, serializeOdNextPromptBundleV2,
@@ -171,7 +171,7 @@ fs.appendFileSync(${JSON.stringify(executionLog)}, JSON.stringify(process.argv) 
 });
 
 type Window = 'saved-plan-only' | 'provider-failed' | 'user-canceled' | 'consumed-produce-successor';
-async function seedWindow(db: Database.Database, window: Window) {
+async function seedWindow(db: SqlDatabase, window: Window) {
   const projectId = `bootstrap-${window}`;
   const conversationId = `${projectId}-conversation`;
   insertProject(db, { id: projectId, name: projectId, createdAt: 1, updatedAt: 1 });

@@ -16,7 +16,7 @@
 // because it returns the underlying CJS `module.exports` object.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -77,7 +77,7 @@ function line(lines: TranscriptLines, index: number): TranscriptLine {
   return item;
 }
 
-function setup(opts: { skipMkdir?: boolean } = {}): { db: Database.Database; projectsRoot: string } {
+function setup(opts: { skipMkdir?: boolean } = {}): { db: SqlDatabase; projectsRoot: string } {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-tx-'));
   const db = openDatabase(tempDir);
   insertProject(db, {
@@ -102,7 +102,7 @@ function readLines(filePath: string): TranscriptLines {
     .map((l) => JSON.parse(l) as TranscriptLine) as TranscriptLines;
 }
 
-function seedConversation(db: Database.Database, opts: { id: string; createdAt: number; updatedAt?: number; title?: string | null }) {
+function seedConversation(db: SqlDatabase, opts: { id: string; createdAt: number; updatedAt?: number; title?: string | null }) {
   insertConversation(db, {
     id: opts.id,
     projectId: PROJECT_ID,
@@ -113,7 +113,7 @@ function seedConversation(db: Database.Database, opts: { id: string; createdAt: 
 }
 
 function seedMessage(
-  db: Database.Database,
+  db: SqlDatabase,
   conversationId: string,
   m: {
     id: string;
