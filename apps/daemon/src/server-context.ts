@@ -209,7 +209,6 @@ export interface ServerContext {
   nativeDialogs: any;
   research: any;
   mcp: {
-    pendingAuth: any;
     daemonUrlRef: { current: string };
     inheritedEnvironment: (baseEnv?: NodeJS.ProcessEnv) => Record<string, string>;
   };

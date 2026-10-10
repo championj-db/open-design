@@ -705,19 +705,6 @@ import {
   resolveExternalMcpServersForRun,
 } from './run-tool-bundle.js';
 import {
-  beginAuth,
-  exchangeCodeForToken,
-  PendingAuthCache,
-  refreshAccessToken,
-} from './mcp-oauth.js';
-import {
-  clearToken,
-  getToken,
-  isTokenExpired,
-  readAllTokens,
-  setToken,
-} from './mcp-tokens.js';
-import {
   agentCliEnvForAgent,
   readAppConfig,
   readAppConfigSync,
@@ -1458,12 +1445,6 @@ const designSystemGenerationJobs = createDesignSystemGenerationJobStore({
 });
 let routineService = null;
 
-// In-memory OAuth state cache. Lives for the daemon process's lifetime.
-// Maps the OAuth `state` parameter we generated in /api/mcp/oauth/start
-// to the verifier + endpoint info needed to finish the exchange when the
-// browser hits /api/mcp/oauth/callback.
-const mcpPendingAuth = new PendingAuthCache();
-
 /**
  * Resolve the daemon's public base URL — the origin the user's browser
  * (or the OAuth provider) reaches us at. Order of precedence:
@@ -1474,10 +1455,6 @@ const mcpPendingAuth = new PendingAuthCache();
  *      local dev and most reverse-proxy setups (Express respects
  *      `trust proxy` so X-Forwarded-* headers are honored).
  *
- * The OAuth callback URI is derived from this — it MUST be reachable from
- * the user's browser, otherwise the redirect after auth lands on
- * ERR_CONNECTION_REFUSED. Misconfiguration is loud: the OAuth provider
- * will reject `redirect_uri` mismatches.
  */
 function getPublicBaseUrl(req) {
   const env = process.env.OD_PUBLIC_BASE_URL;
@@ -1488,52 +1465,6 @@ function getPublicBaseUrl(req) {
   const host = req.get('host');
   if (!host) return `http://localhost:${process.env.OD_PORT ?? '7456'}`;
   return `${proto}://${host}`;
-}
-
-function mcpOAuthCallbackUrl(req) {
-  return `${getPublicBaseUrl(req)}/api/mcp/oauth/callback`;
-}
-
-/**
- * Refresh an expired token using the OAuth client context that the original
- * authorization-code exchange persisted alongside the token. Refresh tokens
- * are bound (RFC 6749 §6) to the client that received them, so we MUST
- * refresh against the same `tokenEndpoint` / `clientId` / `clientSecret`
- * pair — re-running discovery with a different redirect URI would risk
- * registering a new client_id that the upstream then rejects the refresh
- * for. Tokens persisted before that context was recorded can't be safely
- * refreshed; the caller treats `null` as "needs reconnect".
- */
-async function refreshAndPersistToken(dataDir, serverId, current) {
-  if (!current.refreshToken) return null;
-  if (!current.tokenEndpoint || !current.clientId) return null;
-  const tokenResp = await refreshAccessToken({
-    tokenEndpoint: current.tokenEndpoint,
-    clientId: current.clientId,
-    clientSecret: current.clientSecret,
-    refreshToken: current.refreshToken,
-    scope: current.scope,
-    resource: current.resourceUrl,
-  });
-  const next = {
-    accessToken: tokenResp.access_token,
-    refreshToken: tokenResp.refresh_token ?? current.refreshToken,
-    tokenType: tokenResp.token_type ?? 'Bearer',
-    scope: tokenResp.scope ?? current.scope,
-    expiresAt:
-      typeof tokenResp.expires_in === 'number'
-        ? Date.now() + tokenResp.expires_in * 1000
-        : undefined,
-    savedAt: Date.now(),
-    tokenEndpoint: current.tokenEndpoint,
-    clientId: current.clientId,
-    clientSecret: current.clientSecret,
-    authServerIssuer: current.authServerIssuer,
-    redirectUri: current.redirectUri,
-    resourceUrl: current.resourceUrl,
-  };
-  await setToken(dataDir, serverId, next);
-  return next;
 }
 
 const activeChatAgentEventSinks = new Map();
@@ -8559,7 +8490,7 @@ export async function startServer({
   registerMcpRoutes(app, {
     http: httpDeps,
     paths: pathDeps,
-    mcp: { pendingAuth: mcpPendingAuth, daemonUrlRef, inheritedEnvironment },
+    mcp: { daemonUrlRef, inheritedEnvironment },
   });
   // Project workspace
   registerActiveContextRoutes(app, {
@@ -11305,51 +11236,10 @@ export async function startServer({
       runScopedServers: runScopedMcpServers,
       sandboxMode: SANDBOX_RUNTIME.enabled,
     });
+    // MCP OAuth sign-in was removed with the Databricks auth wave, so no
+    // per-server Bearer tokens are injected at spawn.
     const oauthTokensForSpawn = {};
-    if (persistedTokenServerIds.size > 0) {
-      try {
-        const stored = await readAllTokens(RUNTIME_DATA_DIR);
-        for (const [serverId, tok] of Object.entries(stored)) {
-          if (!persistedTokenServerIds.has(serverId)) continue;
-          // Default to the persisted access token; null it out if expired so
-          // we never inject a stale `Authorization: Bearer …` header. The
-          // model treats a server with a Bearer pinned as connected and
-          // discourages re-auth, which is the worst possible UX when the
-          // token is going to 401 every call.
-          let access = isTokenExpired(tok) ? null : tok.accessToken;
-          if (isTokenExpired(tok) && tok.refreshToken) {
-            try {
-              const refreshed = await refreshAndPersistToken(
-                RUNTIME_DATA_DIR,
-                serverId,
-                tok,
-              );
-              if (refreshed) access = refreshed.accessToken;
-            } catch (err) {
-              console.warn(
-                '[mcp-oauth] refresh failed for',
-                serverId,
-                err && err.message ? err.message : err,
-              );
-            }
-          }
-          if (access) {
-            oauthTokensForSpawn[serverId] = access;
-          } else {
-            console.warn(
-              '[mcp-oauth] skipping expired token for',
-              serverId,
-              '— reconnect required',
-            );
-          }
-        }
-      } catch (err) {
-        console.warn(
-          '[mcp-tokens] read failed:',
-          err && err.message ? err.message : err,
-        );
-      }
-    }
+    void persistedTokenServerIds;
     const connectedExternalMcp = enabledExternalMcp
       .filter((s) => typeof oauthTokensForSpawn[s.id] === 'string')
       .map((s) => ({ id: s.id, label: s.label }));
@@ -17915,7 +17805,7 @@ export async function startServer({
     orbit: orbitDeps,
     nativeDialogs: nativeDialogDeps,
     research: researchDeps,
-    mcp: { pendingAuth: mcpPendingAuth, daemonUrlRef },
+    mcp: { daemonUrlRef },
     plugins: {
       connectorService,
       detectSkillPluginCandidateOnRunSuccess,
