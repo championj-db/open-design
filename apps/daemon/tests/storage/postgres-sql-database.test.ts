@@ -7,7 +7,9 @@ import {
   crashSqlBridgeAfterNextStatementForTests,
   crashSqlBridgeForTests,
   isConstraintViolation,
+  mayCommit,
   setSqlBridgeTestOptions,
+  splitStatements,
   SQL_INDETERMINATE,
   SQL_TX_LOST,
   SqlDatabase,
@@ -290,6 +292,52 @@ describe('SqlDatabase failure handling', () => {
       logged.mockRestore();
     }
   }, 30_000);
+
+  it.each([
+    ['END', (h: SqlDatabase) => {
+      h.prepare('INSERT INTO items (name) VALUES (?)').run('committed');
+      crashSqlBridgeAfterNextStatementForTests();
+      h.exec('END');
+    }],
+    ['a multi-statement request ending in COMMIT', (h: SqlDatabase) => {
+      crashSqlBridgeAfterNextStatementForTests();
+      h.exec(`INSERT INTO items (name) VALUES ('committed'); COMMIT`);
+    }],
+    ['a multi-statement request ending in END', (h: SqlDatabase) => {
+      crashSqlBridgeAfterNextStatementForTests();
+      h.exec(`INSERT INTO items (name) VALUES ('committed'); END;`);
+    }],
+  ])('reports a lost reply for %s inside a manual transaction as indeterminate', (_label, commitThenLoseReply) => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      db.exec('BEGIN');
+      let failure: unknown;
+      try {
+        commitThenLoseReply(db);
+      } catch (error) {
+        failure = error;
+      }
+      // Not a definitive rollback (OD_BRIDGE_TX_LOST): the data did commit.
+      expect((failure as { code?: string }).code).toBe(SQL_INDETERMINATE);
+      expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'committed' }]);
+      // That session is over, so the handle is no longer in a transaction.
+      expect(db.inTransaction).toBe(false);
+    } finally {
+      logged.mockRestore();
+    }
+  }, 30_000);
+
+  it('recognizes commit-capable requests statement by statement', () => {
+    expect(splitStatements(`INSERT INTO t VALUES ('a;b'); -- c; COMMIT\n /* ; */ END`))
+      .toEqual([`INSERT INTO t VALUES ('a;b')`, 'END']);
+    expect(mayCommit('COMMIT')).toBe(true);
+    expect(mayCommit('end')).toBe(true);
+    expect(mayCommit('UPDATE t SET a = 1; COMMIT')).toBe(true);
+    expect(mayCommit(`SELECT 'COMMIT'; -- COMMIT`)).toBe(false);
+    expect(mayCommit('ROLLBACK')).toBe(false);
+    expect(mayCommit('SELECT CASE WHEN a THEN 1 END FROM t')).toBe(false);
+  });
 
   it('reports a lost reply inside a transaction as a lost transaction, never committed', () => {
     process.env.OD_PG_WORKER_STALL_MS = '500';

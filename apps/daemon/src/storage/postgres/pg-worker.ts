@@ -192,11 +192,13 @@ function toBuffer(value: unknown): unknown {
 }
 
 function trackTransaction(handle: Handle, sql: string): void {
-  const head = sql.trimStart().slice(0, 12).toUpperCase();
-  if (head.startsWith('BEGIN')) handle.inTransaction = true;
-  else if (head.startsWith('COMMIT') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'))) {
-    handle.inTransaction = false;
-  }
+  // The last statement decides (a request may be `...; COMMIT`). Naive split
+  // is enough here: this only steers idle-connection recycling, and the
+  // caller (sql-database.ts) owns the authoritative transaction state.
+  const statements = sql.split(';').map((part) => part.trim()).filter(Boolean);
+  const last = statements[statements.length - 1] ?? '';
+  if (/^BEGIN\b/i.test(last)) handle.inTransaction = true;
+  else if (/^(COMMIT|END)\b/i.test(last) || /^ROLLBACK\b(?!\s+TO\b)/i.test(last)) handle.inTransaction = false;
 }
 
 async function handle(request: Request): Promise<unknown> {
@@ -263,7 +265,7 @@ async function handle(request: Request): Promise<unknown> {
     // Ending the lost transaction is the only thing allowed; nothing may run
     // on a fresh connection as if it were still inside it.
     const head = request.op === 'exec' ? request.sql.trimStart().slice(0, 12).toUpperCase() : '';
-    const ends = head.startsWith('COMMIT') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'));
+    const ends = head.startsWith('COMMIT') || head.startsWith('END') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'));
     if (ends) {
       entry.txLost = false;
       entry.inTransaction = false;
@@ -411,7 +413,7 @@ init.port.on('message', (request: Request) => {
       await current.cancel;
       await retireClient(current.entry);
     }
-    if (crashAfterNextStatement && request.op === 'query') {
+    if (crashAfterNextStatement && (request.op === 'query' || request.op === 'exec')) {
       // Test hook: the statement ran (and committed) but the reply is lost.
       setImmediate(() => {
         throw new Error('pg worker crash requested after statement');

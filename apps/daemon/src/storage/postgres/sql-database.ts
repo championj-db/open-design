@@ -344,6 +344,76 @@ function reviveRow(row: Record<string, unknown>): Record<string, unknown> {
 
 // ---------------------------------------------------------------------------
 
+/** True when a single statement's leading keyword commits (COMMIT / END). */
+export function statementCommits(statement: string): boolean {
+  return /^\s*(COMMIT|END)\b/i.test(statement);
+}
+
+/** True when a single statement's leading keyword rolls back the whole transaction. */
+function statementRollsBack(statement: string): boolean {
+  return /^\s*ROLLBACK\b(?!\s+TO\b)/i.test(statement);
+}
+
+/**
+ * The top-level statements of a SQL string: split on `;` outside string
+ * literals, quoted identifiers, dollar-quoted bodies and comments (which are
+ * dropped). Used to see every statement a multi-statement request contains.
+ */
+export function splitStatements(sql: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i]!;
+    const rest = sql.slice(i);
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < sql.length && !(sql[j] === ch && sql[j + 1] !== ch)) j += sql[j] === ch ? 2 : 1;
+      current += sql.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    const dollar = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+    if (dollar) {
+      const close = sql.indexOf(dollar[0], i + dollar[0].length);
+      const j = close < 0 ? sql.length : close + dollar[0].length;
+      current += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (rest.startsWith('--')) {
+      const nl = sql.indexOf('\n', i);
+      i = nl < 0 ? sql.length : nl;
+      continue;
+    }
+    if (rest.startsWith('/*')) {
+      const close = sql.indexOf('*/', i + 2);
+      i = close < 0 ? sql.length : close + 2;
+      continue;
+    }
+    if (ch === ';') {
+      if (current.trim()) out.push(current.trim());
+      current = '';
+      i += 1;
+      continue;
+    }
+    current += ch;
+    i += 1;
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
+/**
+ * Could running `sql` have committed a transaction? Shared by exec()'s
+ * transaction tracking and the lost-reply classifier so they never diverge:
+ * anything that might have committed must never be reported as a definitive
+ * rollback.
+ */
+export function mayCommit(sql: string): boolean {
+  return splitStatements(sql).some(statementCommits);
+}
+
 function txLostError(): SqlError {
   return new SqlError({
     code: SQL_TX_LOST,
@@ -420,13 +490,16 @@ export class SqlDatabase {
       const code = (error as { code?: unknown }).code;
       if (code === SQL_TX_LOST && this.inTransaction) this.brokenTx = true;
       if (code === SQL_INDETERMINATE) {
-        const commit = typeof request.sql === 'string' && /^\s*COMMIT\b/i.test(request.sql);
-        if (this.inTransaction && !commit) {
+        const commitCapable = typeof request.sql !== 'string' || mayCommit(request.sql);
+        if (this.inTransaction && !commitCapable) {
           // The statement was inside an uncommitted transaction whose session
           // is gone, so nothing it did can persist: that is not ambiguous.
           this.brokenTx = true;
           throw txLostError();
         }
+        // It may have committed; either way that session (and any manual
+        // transaction on it) is over.
+        if (this.txDepth === 0) this.manualTx = false;
         console.error(
           `[od] postgres outcome INDETERMINATE (${this.name}, op=${String(request.op)}): `
             + `${String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, 200)}`,
@@ -489,20 +562,23 @@ export class SqlDatabase {
   /** Run one or more parameterless statements (simple query protocol). */
   exec(sql: string): this {
     this.assertOpen();
-    const head = sql.trimStart().slice(0, 12).toUpperCase();
-    const ends = head.startsWith('COMMIT') || head.startsWith('END') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'));
+    const statements = splitStatements(sql);
+    const first = statements[0] ?? '';
+    const last = statements[statements.length - 1] ?? '';
+    const ends = statementCommits(first) || statementRollsBack(first);
     if (this.brokenTx && this.manualTx && this.txDepth === 0 && ends) {
       // Ending a manually begun transaction that was lost: roll back (which
       // is all that can happen to it) and report a COMMIT as lost.
       this.brokenTx = false;
       this.manualTx = false;
       this.rollbackQuietly('ROLLBACK');
-      if (head.startsWith('ROLLBACK')) return this;
+      if (statementRollsBack(first)) return this;
       throw txLostError();
     }
     this.send({ op: 'exec', sql: translate(sql).text }, sql);
-    if (head.startsWith('BEGIN')) this.manualTx = true;
-    else if (ends) this.manualTx = false;
+    // The transaction state after the request is set by its LAST statement.
+    if (/^\s*BEGIN\b/i.test(last)) this.manualTx = true;
+    else if (statementCommits(last) || statementRollsBack(last)) this.manualTx = false;
     return this;
   }
 
