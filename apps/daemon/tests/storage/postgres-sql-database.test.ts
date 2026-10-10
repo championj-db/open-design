@@ -3,7 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appliedMigrationIds, runMigrations } from '../../src/storage/postgres/migrations.js';
-import { isConstraintViolation, type SqlDatabase } from '../../src/storage/postgres/sql-database.js';
+import {
+  crashSqlBridgeForTests,
+  isConstraintViolation,
+  SqlDatabase,
+} from '../../src/storage/postgres/sql-database.js';
 import { DAEMON_MIGRATIONS } from '../../src/db.js';
 import { createTestDatabase, tableExists } from '../helpers/test-db.js';
 
@@ -100,6 +104,132 @@ describe('SqlDatabase', () => {
   });
 });
 
+describe('SqlDatabase failure handling', () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    for (const key of ['OD_PG_QUERY_TIMEOUT_MS', 'OD_PG_WORKER_STALL_MS']) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  });
+
+  it('keeps SQLite NULL semantics for multi-argument MAX/MIN', () => {
+    db.prepare('INSERT INTO items (name, size) VALUES (?, ?), (?, ?)').run('n', null, 's', 5);
+    const pick = db.prepare('SELECT MAX(size, ?) AS hi, MIN(size, ?) AS lo FROM items WHERE name = ?');
+    expect(pick.get(3, 3, 'n')).toEqual({ hi: null, lo: null });
+    expect(pick.get(3, 3, 's')).toEqual({ hi: 5, lo: 3 });
+    expect(pick.get(null, null, 's')).toEqual({ hi: null, lo: null });
+    db.prepare('UPDATE items SET size = MAX(size, ?) WHERE name = ?').run(9, 's');
+    db.prepare('UPDATE items SET size = MAX(size, ?) WHERE name = ?').run(9, 'n');
+    expect(db.prepare('SELECT name, size FROM items ORDER BY name').all()).toEqual([
+      { name: 'n', size: null },
+      { name: 's', size: 9 },
+    ]);
+    // Inside an upsert, against excluded.
+    db.prepare(`INSERT INTO items (name, size) VALUES (?, ?)
+      ON CONFLICT (name) DO UPDATE SET size = MAX(items.size, excluded.size)`).run('s', 4);
+    expect(db.prepare('SELECT size FROM items WHERE name = ?').get('s')).toEqual({ size: 9 });
+  });
+
+  it('rolls back and stays usable when the .immediate() write lock times out', () => {
+    const contender = new SqlDatabase({ config: { ...db.config, lockTimeoutMs: 100 }, createSchema: false });
+    try {
+      db.exec('BEGIN');
+      db.prepare(`SELECT pg_advisory_xact_lock(hashtext('od_write_lock:' || current_schema()))`).get();
+      let failure: unknown;
+      try {
+        contender.transaction(() => {
+          contender.prepare('INSERT INTO items (name) VALUES (?)').run('blocked');
+        }).immediate();
+      } catch (error) {
+        failure = error;
+      }
+      expect((failure as { code?: string }).code).toBe('55P03');
+      expect(contender.inTransaction).toBe(false);
+      // The connection is clean: plain statements and new transactions work.
+      expect(contender.prepare('SELECT 1 AS ok').get()).toEqual({ ok: 1 });
+      db.exec('ROLLBACK');
+      contender.transaction(() => {
+        contender.prepare('INSERT INTO items (name) VALUES (?)').run('after');
+      }).immediate();
+      expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'after' }]);
+    } finally {
+      if (db.inTransaction) db.exec('ROLLBACK');
+      contender.close();
+    }
+  });
+
+  it('never commits a write that is reported as timed out', () => {
+    process.env.OD_PG_QUERY_TIMEOUT_MS = '2000';
+    // statement_timeout is set when the connection opens: 1000ms here.
+    const slow = new SqlDatabase({ config: db.config, createSchema: false });
+    try {
+      const started = Date.now();
+      let failure: unknown;
+      try {
+        slow.prepare(`INSERT INTO items (name) SELECT 'slow' FROM pg_sleep(4)`).run();
+      } catch (error) {
+        failure = error;
+      }
+      expect((failure as { code?: string }).code).toBe('57014');
+      expect(Date.now() - started).toBeLessThan(3_000);
+
+      // Even with the server timeout lifted, a bridge timeout cancels the
+      // statement on the server before reporting.
+      failure = undefined;
+      try {
+        slow.transaction(() => {
+          slow.exec('SET LOCAL statement_timeout = 0');
+          slow.prepare(`INSERT INTO items (name) SELECT 'slower' FROM pg_sleep(6)`).run();
+        })();
+      } catch (error) {
+        failure = error;
+      }
+      expect((failure as { code?: string }).code).toBe('57014');
+      expect(slow.inTransaction).toBe(false);
+      expect(slow.prepare('SELECT 1 AS ok').get()).toEqual({ ok: 1 });
+      // Give any straggler time to (wrongly) commit, then check.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_500);
+      expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
+    } finally {
+      slow.close();
+    }
+  }, 30_000);
+
+  it('closes the connection when opening a handle fails after connect', () => {
+    const connections = () => (db.prepare(
+      `SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()`,
+    ).get() as { n: number }).n;
+    const before = connections();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // SET lock_timeout = -1 is rejected after the connection is up.
+      expect(() => new SqlDatabase({ config: { ...db.config, lockTimeoutMs: -1 }, createSchema: false }))
+        .toThrow();
+    }
+    expect(connections()).toBe(before);
+  });
+
+  it('detects a dead worker promptly and reconnects on the next call', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    db.prepare('INSERT INTO items (name) VALUES (?)').run('before');
+    const started = Date.now();
+    expect(() => crashSqlBridgeForTests()).toThrow('postgres worker stopped responding');
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // The existing handle reopens its connection on a fresh worker.
+    expect(db.prepare('SELECT name FROM items').all()).toEqual([{ name: 'before' }]);
+  }, 30_000);
+
+  it('reports the lost transaction when the worker dies inside one', () => {
+    process.env.OD_PG_WORKER_STALL_MS = '500';
+    expect(() => db.transaction(() => {
+      db.prepare('INSERT INTO items (name) VALUES (?)').run('in-tx');
+      crashSqlBridgeForTests();
+    })()).toThrow();
+    expect(db.inTransaction).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM items').get()).toEqual({ n: 0 });
+  }, 30_000);
+});
+
 describe('runMigrations', () => {
   it('applies pending migrations once, in order, and records them', () => {
     const calls: string[] = [];
@@ -112,6 +242,12 @@ describe('runMigrations', () => {
     expect(runMigrations(db, [...migrations, { id: 'c', up: () => { calls.push('c'); } }]).applied).toEqual(['c']);
     expect(calls).toEqual(['a', 'b', 'c']);
     expect(appliedMigrationIds(db)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('reports migrations in execution order, not by id, within one millisecond', () => {
+    const noop = () => {};
+    runMigrations(db, [{ id: 'zeta', up: noop }, { id: 'alpha', up: noop }, { id: 'mu', up: noop }]);
+    expect(appliedMigrationIds(db)).toEqual(['zeta', 'alpha', 'mu']);
   });
 
   it('rolls back every pending migration when one fails', () => {

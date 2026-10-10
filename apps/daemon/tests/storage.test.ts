@@ -337,6 +337,20 @@ describe('resolveDaemonDbConfig', () => {
     });
   });
 
+  it('rejects TLS downgrades for Lakebase and keeps require/verify-full', () => {
+    const lakebase = {
+      LAKEBASE_ENDPOINT: 'projects/p/branches/main/endpoints/ep',
+      PGHOST: 'ep-x.example',
+      PGUSER: 'sp-guid',
+    };
+    for (const weak of ['disable', 'prefer', 'allow']) {
+      expect(() => resolveDaemonDbConfig({ ...lakebase, PGSSLMODE: weak })).toThrow(DaemonDbConfigError);
+    }
+    expect(resolveDaemonDbConfig({ ...lakebase, PGSSLMODE: 'require' }).sslMode).toBe('require');
+    expect(resolveDaemonDbConfig({ ...lakebase, PGSSLMODE: 'verify-full' }).sslMode).toBe('verify-full');
+    expect(resolveDaemonDbConfig({ ...lakebase, PGSSLMODE: 'verify-ca' }).sslMode).toBe('verify-full');
+  });
+
   it('falls back to CLI credential minting without a workspace host', () => {
     const cfg = resolveDaemonDbConfig({
       LAKEBASE_ENDPOINT: 'projects/p/branches/main/endpoints/ep',

@@ -81,6 +81,7 @@ export function recordStrategyRunWriteEvidence(db: SqliteDb, input: {
     .get(input.taskExecutionId, input.runId)) throw conflict();
   db.prepare(`INSERT INTO strategy_task_run_write_evidence(task_execution_id, run_id, files_written, unknown, source_mask)
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_execution_id, run_id) DO UPDATE SET
+    -- GREATEST is SQLite's scalar MAX here: every operand is NOT NULL.
     files_written = GREATEST(strategy_task_run_write_evidence.files_written, excluded.files_written),
     unknown = GREATEST(strategy_task_run_write_evidence.unknown, excluded.unknown),
     source_mask = strategy_task_run_write_evidence.source_mask | excluded.source_mask`)

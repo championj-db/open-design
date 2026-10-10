@@ -44,10 +44,20 @@ describe('translateSql', () => {
   });
 
   it('maps SQLite functions and operators', () => {
-    expect(translateSql('SELECT IFNULL(a, 0), MAX(a, b), MIN(a, b), MAX(c) FROM t WHERE a == 1').text)
-      .toBe('SELECT COALESCE(a, 0), GREATEST(a, b), LEAST(a, b), MAX(c) FROM t WHERE a = 1');
+    expect(translateSql('SELECT IFNULL(a, 0), MAX(c) FROM t WHERE a == 1').text)
+      .toBe('SELECT COALESCE(a, 0), MAX(c) FROM t WHERE a = 1');
     expect(translateSql("SELECT CAST(a AS INTEGER), CAST(b AS REAL) FROM t WHERE c LIKE '%x%'").text)
       .toBe("SELECT CAST(a AS BIGINT), CAST(b AS DOUBLE PRECISION) FROM t WHERE c ILIKE '%x%'");
+  });
+
+  it('rewrites scalar MAX/MIN with SQLite NULL semantics, one binding per argument', () => {
+    const out = translateSql('SELECT MAX(a, ?) AS hi, MIN(b, c, ?) FROM t ORDER BY MAX(x, y) DESC');
+    expect(out.text).toBe(
+      'SELECT (SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE MAX(od_v) END FROM (VALUES (a), ( $1)) AS od_scalar(od_v)) AS hi, '
+        + '(SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE MIN(od_v) END FROM (VALUES (b), ( c), ( $2)) AS od_scalar(od_v)) FROM t '
+        + 'ORDER BY (SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE MAX(od_v) END FROM (VALUES (x), ( y)) AS od_scalar(od_v)) DESC NULLS LAST',
+    );
+    expect(out.bindings).toEqual([0, 1]);
   });
 
   it('treats dollar-quoted bodies and backtick identifiers correctly', () => {

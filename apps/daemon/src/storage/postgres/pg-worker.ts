@@ -44,13 +44,16 @@ interface ConnConfig {
 }
 
 type Request =
-  | { id: number; op: 'open'; handle: number; config: ConnConfig; createSchema: boolean }
+  | { id: number; op: 'open'; handle: number; config: ConnConfig; createSchema: boolean; statementTimeoutMs?: number }
+  | { id: number; op: 'crash' }
   | { id: number; op: 'query'; handle: number; sql: string; params: unknown[]; savepoint: boolean }
   | { id: number; op: 'exec'; handle: number; sql: string }
   | { id: number; op: 'close'; handle: number };
 
 interface Handle {
   config: ConnConfig;
+  /** Server-side statement_timeout (ms), shorter than the caller's bridge timeout. */
+  statementTimeoutMs: number | null;
   client: pg.Client | null;
   /** Statement text -> server-side prepared statement name, per connection. */
   statements: Map<string, string>;
@@ -73,6 +76,14 @@ let statementCounter = 0;
 
 const init = workerData as WorkerInit;
 const flag = new Int32Array(init.signal);
+// Slots shared with sql-database.ts.
+const SLOT_REPLY = 0;
+const SLOT_CANCEL = 1;
+const SLOT_HEARTBEAT = 2;
+// Proves to a blocked caller that this thread's event loop is alive.
+setInterval(() => {
+  Atomics.add(flag, SLOT_HEARTBEAT, 1);
+}, 100).unref();
 const handles = new Map<number, Handle>();
 let credentialModule: Promise<{
   createLakebasePasswordProvider: (config: unknown) => () => Promise<string>;
@@ -113,11 +124,22 @@ async function connect(handle: Handle): Promise<pg.Client> {
     handle.broken = true;
   });
   await client.connect();
-  if (config.schema) {
-    await client.query(`SET search_path TO ${quoteIdent(config.schema)}`);
-  }
-  if (typeof config.lockTimeoutMs === 'number') {
-    await client.query(`SET lock_timeout = ${Math.trunc(config.lockTimeoutMs)}`);
+  try {
+    if (config.schema) {
+      await client.query(`SET search_path TO ${quoteIdent(config.schema)}`);
+    }
+    if (typeof config.lockTimeoutMs === 'number') {
+      await client.query(`SET lock_timeout = ${Math.trunc(config.lockTimeoutMs)}`);
+    }
+    if (handle.statementTimeoutMs !== null) {
+      // The server aborts a statement before the caller's bridge timeout, so
+      // a statement reported as failed can never commit afterwards.
+      await client.query(`SET statement_timeout = ${Math.trunc(handle.statementTimeoutMs)}`);
+    }
+  } catch (error) {
+    // Never leak a half-initialized connection.
+    await client.end().catch(() => {});
+    throw error;
   }
   handle.client = client;
   handle.statements = new Map();
@@ -162,6 +184,7 @@ async function handle(request: Request): Promise<unknown> {
   if (request.op === 'open') {
     const entry: Handle = {
       config: request.config,
+      statementTimeoutMs: typeof request.statementTimeoutMs === 'number' ? request.statementTimeoutMs : null,
       client: null,
       statements: new Map(),
       connectedAt: 0,
@@ -169,7 +192,6 @@ async function handle(request: Request): Promise<unknown> {
       inTransaction: false,
       password: null,
     };
-    handles.set(request.handle, entry);
     if (request.createSchema && request.config.schema) {
       // Create the schema on a schema-less connection first: search_path to a
       // missing schema is legal but every unqualified CREATE would then fail.
@@ -187,7 +209,19 @@ async function handle(request: Request): Promise<unknown> {
       entry.password = bootstrap.password;
     }
     await clientFor(entry);
+    // Registered only once its connection is up, so a failed open leaves
+    // nothing behind (a retry opens a fresh handle).
+    const previous = handles.get(request.handle);
+    handles.set(request.handle, entry);
+    await previous?.client?.end().catch(() => {});
     return null;
+  }
+  if (request.op === 'crash') {
+    // Test hook: die without replying, as a crashed worker would.
+    setImmediate(() => {
+      throw new Error('pg worker crash requested');
+    });
+    return new Promise(() => {});
   }
   const entry = handles.get(request.handle);
   if (!entry) throw new Error(`database handle ${request.handle} is not open`);
@@ -265,17 +299,56 @@ function serializeError(error: unknown): Record<string, unknown> {
 }
 
 let queue: Promise<void> = Promise.resolve();
+let inFlight: { id: number; entry: Handle | undefined; cancelled: boolean } | null = null;
+
+/**
+ * The caller gave up waiting on the in-flight request: cancel its statement
+ * on the server (pg_cancel_backend from a side connection) so it cannot keep
+ * running and commit after the caller was told it failed. The request then
+ * replies with the cancellation error, or with its result if it had already
+ * finished.
+ */
+async function cancelInFlight(target: { id: number; entry: Handle | undefined; cancelled: boolean }): Promise<void> {
+  target.cancelled = true;
+  const entry = target.entry;
+  const pid = (entry?.client as { processID?: number } | null | undefined)?.processID;
+  if (!entry || typeof pid !== 'number') return;
+  const side: Handle = { ...entry, config: { ...entry.config, schema: null }, statementTimeoutMs: 10_000, client: null };
+  try {
+    const client = await connect(side);
+    try {
+      await client.query('SELECT pg_cancel_backend($1)', [pid]);
+    } finally {
+      await client.end().catch(() => {});
+    }
+  } catch {
+    // Best effort: the caller's grace period still bounds the wait.
+  }
+}
+
+setInterval(() => {
+  const current = inFlight;
+  if (current && !current.cancelled && Atomics.load(flag, SLOT_CANCEL) === current.id) {
+    void cancelInFlight(current);
+  }
+}, 100).unref();
 
 init.port.on('message', (request: Request) => {
   queue = queue.then(async () => {
+    inFlight = {
+      id: request.id,
+      entry: 'handle' in request ? handles.get(request.handle) : undefined,
+      cancelled: false,
+    };
     let reply: { id: number; ok: true; value: unknown } | { id: number; ok: false; error: unknown };
     try {
       reply = { id: request.id, ok: true, value: await handle(request) };
     } catch (error) {
       reply = { id: request.id, ok: false, error: serializeError(error) };
     }
+    inFlight = null;
     init.port.postMessage(reply);
-    Atomics.store(flag, 0, request.id);
-    Atomics.notify(flag, 0);
+    Atomics.store(flag, SLOT_REPLY, request.id);
+    Atomics.notify(flag, SLOT_REPLY);
   });
 });

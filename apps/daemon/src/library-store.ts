@@ -621,6 +621,9 @@ export interface LibraryTokenRow {
 }
 
 export function insertLibraryToken(db: SqliteDb, row: LibraryTokenRow): void {
+  // Was SQLite INSERT OR REPLACE (delete + insert). An upsert is equivalent
+  // while library_tokens has no delete triggers or referencing foreign keys;
+  // revisit if either is added.
   db.prepare(
     `INSERT INTO library_tokens (token_hash, label, extension_origin, created_at, last_used_at)
      VALUES (?, ?, ?, ?, ?)

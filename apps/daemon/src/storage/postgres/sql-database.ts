@@ -74,15 +74,24 @@ export function isConstraintViolation(error: unknown): boolean {
 // ---------------------------------------------------------------------------
 // Worker bridge (one worker per process, shared by every handle).
 
+// Shared Int32 slots between this thread and the worker.
+const SLOT_REPLY = 0; // id of the last request the worker replied to
+const SLOT_CANCEL = 1; // id of a request the caller gave up on (cancel it)
+const SLOT_HEARTBEAT = 2; // ticks while the worker's event loop is alive
+
 interface Bridge {
   worker: Worker;
   port: MessagePort;
   flag: Int32Array;
   nextId: number;
-  nextHandle: number;
+  generation: number;
+  dead: boolean;
 }
 
 let bridge: Bridge | null = null;
+let bridgeGeneration = 0;
+// Handle ids stay unique across bridge restarts.
+let nextHandleId = 1;
 
 function moduleSibling(name: string): string {
   // Under vitest this module runs from src/*.ts; from dist/*.js in production.
@@ -91,8 +100,8 @@ function moduleSibling(name: string): string {
 }
 
 function getBridge(): Bridge {
-  if (bridge) return bridge;
-  const signal = new SharedArrayBuffer(4);
+  if (bridge && !bridge.dead) return bridge;
+  const signal = new SharedArrayBuffer(3 * Int32Array.BYTES_PER_ELEMENT);
   const { port1, port2 } = new MessageChannel();
   const worker = new Worker(moduleSibling('pg-worker'), {
     workerData: {
@@ -104,8 +113,29 @@ function getBridge(): Bridge {
   });
   worker.unref();
   port1.unref();
-  bridge = { worker, port: port1, flag: new Int32Array(signal), nextId: 1, nextHandle: 1 };
-  return bridge;
+  const created: Bridge = {
+    worker,
+    port: port1,
+    flag: new Int32Array(signal),
+    nextId: 1,
+    generation: ++bridgeGeneration,
+    dead: false,
+  };
+  // Seen whenever this thread is idle; a worker that dies while a caller is
+  // blocked is caught by the heartbeat check in waitForReply instead.
+  const onGone = () => discardBridge(created);
+  worker.once('error', onGone);
+  worker.once('exit', onGone);
+  bridge = created;
+  return created;
+}
+
+function discardBridge(target: Bridge): void {
+  target.dead = true;
+  if (bridge === target) bridge = null;
+  // Terminating the thread closes every socket it owns, so the server ends
+  // those sessions (rolling back any open transaction).
+  target.worker.terminate().catch(() => {});
 }
 
 /** True once this process has started the pg worker (opened any handle). */
@@ -118,29 +148,53 @@ function queryTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 300_000;
 }
 
+/**
+ * Server-side statement_timeout for a bridge timeout. It is strictly shorter
+ * than the bridge timeout, so Postgres aborts a long statement (and reports
+ * that) before the caller could ever be told "timed out" about a statement
+ * that is still running and might commit later.
+ */
+export function statementTimeoutFor(bridgeTimeoutMs: number): number {
+  return bridgeTimeoutMs > 20_000 ? bridgeTimeoutMs - 10_000 : Math.max(1, Math.floor(bridgeTimeoutMs / 2));
+}
+
+function cancelGraceMs(): number {
+  return Math.min(15_000, Math.max(1_000, queryTimeoutMs()));
+}
+
+function workerStallMs(): number {
+  const raw = Number(process.env.OD_PG_WORKER_STALL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
+}
+
 // OD_PG_TRACE=1 logs every bridged request to stderr (debugging aid).
 const traceEnabled = process.env.OD_PG_TRACE === '1';
 
-function call(request: Record<string, unknown>, sql: string | null): unknown {
-  const b = getBridge();
-  const id = b.nextId++;
-  if (traceEnabled) {
-    const text = String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, Number(process.env.OD_PG_TRACE_WIDTH) || 80);
-    process.stderr.write(`[pg-trace] ${Date.now()} #${id} ${String(request.op)} h${String(request.handle)} ${text}\n`);
-  }
-  // Request ids grow monotonically, so the flag only ever moves forward and
-  // an abandoned (timed-out) reply can never satisfy a later wait.
-  b.port.postMessage({ ...request, id });
-  const deadline = Date.now() + queryTimeoutMs();
+type WaitOutcome = 'replied' | 'deadline' | 'dead';
+
+/** Block until the worker has replied to `id`, `deadline` passes, or the worker stops ticking. */
+function waitForReply(b: Bridge, id: number, deadline: number): WaitOutcome {
+  let beat = Atomics.load(b.flag, SLOT_HEARTBEAT);
+  let beatSeenAt = Date.now();
+  const stallMs = workerStallMs();
   for (;;) {
-    const current = Atomics.load(b.flag, 0);
-    if (current >= id) break;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      throw new SqlError({ message: `postgres request timed out after ${queryTimeoutMs()}ms` }, sql);
+    const current = Atomics.load(b.flag, SLOT_REPLY);
+    if (current >= id) return 'replied';
+    const now = Date.now();
+    const nextBeat = Atomics.load(b.flag, SLOT_HEARTBEAT);
+    if (nextBeat !== beat) {
+      beat = nextBeat;
+      beatSeenAt = now;
+    } else if (now - beatSeenAt > stallMs) {
+      return 'dead';
     }
-    Atomics.wait(b.flag, 0, current, Math.min(remaining, 1000));
+    const remaining = deadline - now;
+    if (remaining <= 0) return 'deadline';
+    Atomics.wait(b.flag, SLOT_REPLY, current, Math.min(remaining, 250));
   }
+}
+
+function takeReply(b: Bridge, id: number, sql: string | null): unknown {
   for (;;) {
     const received = receiveMessageOnPort(b.port);
     if (!received) {
@@ -151,6 +205,41 @@ function call(request: Record<string, unknown>, sql: string | null): unknown {
     if (!reply.ok) throw new SqlError(reply.error ?? {}, sql);
     return reply.value;
   }
+}
+
+function call(b: Bridge, request: Record<string, unknown>, sql: string | null): unknown {
+  const id = b.nextId++;
+  if (traceEnabled) {
+    const text = String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, Number(process.env.OD_PG_TRACE_WIDTH) || 80);
+    process.stderr.write(`[pg-trace] ${Date.now()} #${id} ${String(request.op)} h${String(request.handle)} ${text}\n`);
+  }
+  // Request ids grow monotonically, so the flag only ever moves forward and
+  // an abandoned reply can never satisfy a later wait.
+  b.port.postMessage({ ...request, id });
+  let outcome = waitForReply(b, id, Date.now() + queryTimeoutMs());
+  if (outcome === 'deadline') {
+    // Do not report a timeout while the statement may still commit: ask the
+    // worker to cancel it on the server, then report whatever really happened
+    // (an error if the cancel won, the result if it had already finished).
+    Atomics.store(b.flag, SLOT_CANCEL, id);
+    outcome = waitForReply(b, id, Date.now() + cancelGraceMs());
+  }
+  if (outcome === 'replied') return takeReply(b, id, sql);
+  // The worker is wedged or gone. Kill it so its sessions end on the server
+  // (statement_timeout bounds anything still executing there).
+  discardBridge(b);
+  throw new SqlError({
+    code: 'OD_BRIDGE_UNAVAILABLE',
+    message: outcome === 'dead'
+      ? 'postgres worker stopped responding'
+      : `postgres request timed out after ${queryTimeoutMs()}ms and could not be cancelled`,
+  }, sql);
+}
+
+/** Test hook: make the worker thread crash while a caller is blocked on it. */
+export function crashSqlBridgeForTests(): void {
+  const b = getBridge();
+  call(b, { op: 'crash' }, null);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +307,7 @@ function reviveRow(row: Record<string, unknown>): Record<string, unknown> {
 
 // ---------------------------------------------------------------------------
 
-const WRITE_LOCK_BEGIN =
-  `BEGIN; SELECT pg_advisory_xact_lock(hashtext('od_write_lock:' || current_schema()))`;
+const WRITE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('od_write_lock:' || current_schema()))`;
 
 export interface SqlDatabaseOptions {
   config: DaemonDbConfig;
@@ -233,19 +321,49 @@ export class SqlDatabase {
   readonly name: string;
   readonly config: DaemonDbConfig;
   private readonly handle: number;
+  private readonly createSchema: boolean;
   private isOpen = true;
   private txDepth = 0;
   private manualTx = false;
+  /** Generation of the bridge this handle's connection lives on. */
+  private generation = 0;
 
   constructor(options: SqlDatabaseOptions) {
-    const b = getBridge();
-    this.handle = b.nextHandle++;
+    this.handle = nextHandleId++;
     this.config = options.config;
     this.name = options.name ?? 'postgres';
-    call(
-      { op: 'open', handle: this.handle, config: options.config, createSchema: options.createSchema !== false },
-      null,
-    );
+    this.createSchema = options.createSchema !== false;
+    this.bridgeFor();
+  }
+
+  /**
+   * The live bridge, (re)opening this handle's connection on it when the
+   * worker was replaced since the handle last used it. A connection lost in
+   * the middle of a transaction cannot be resumed, so that surfaces as an
+   * error and the transaction state is reset.
+   */
+  private bridgeFor(): Bridge {
+    const b = getBridge();
+    if (b.generation === this.generation) return b;
+    const lostTransaction = this.generation !== 0 && (this.txDepth > 0 || this.manualTx);
+    this.txDepth = 0;
+    this.manualTx = false;
+    call(b, {
+      op: 'open',
+      handle: this.handle,
+      config: this.config,
+      createSchema: this.createSchema,
+      statementTimeoutMs: statementTimeoutFor(queryTimeoutMs()),
+    }, null);
+    this.generation = b.generation;
+    if (lostTransaction) {
+      throw new SqlError({ code: 'OD_BRIDGE_UNAVAILABLE', message: 'postgres connection lost inside a transaction' }, null);
+    }
+    return b;
+  }
+
+  private send(request: Record<string, unknown>, sql: string | null): unknown {
+    return call(this.bridgeFor(), { ...request, handle: this.handle }, sql);
   }
 
   get open(): boolean {
@@ -269,10 +387,9 @@ export class SqlDatabase {
     this.assertOpen();
     const translated = translate(sql);
     const params = bindParams(translated, args);
-    const value = call(
+    const value = this.send(
       {
         op: 'query',
-        handle: this.handle,
         sql: translated.text,
         params,
         savepoint: this.inTransaction,
@@ -302,7 +419,7 @@ export class SqlDatabase {
   /** Run one or more parameterless statements (simple query protocol). */
   exec(sql: string): this {
     this.assertOpen();
-    call({ op: 'exec', handle: this.handle, sql: translate(sql).text }, sql);
+    this.send({ op: 'exec', sql: translate(sql).text }, sql);
     const head = sql.trimStart().slice(0, 12).toUpperCase();
     if (head.startsWith('BEGIN')) this.manualTx = true;
     else if (head.startsWith('COMMIT') || head.startsWith('END') || (head.startsWith('ROLLBACK') && !head.startsWith('ROLLBACK TO'))) {
@@ -311,13 +428,31 @@ export class SqlDatabase {
     return this;
   }
 
+  private rollbackQuietly(sql: string): void {
+    try {
+      this.send({ op: 'exec', sql }, null);
+    } catch {
+      // The original error is the one worth surfacing.
+    }
+  }
+
   transaction<F extends AnyFn>(fn: F): SqlTransaction<F> {
-    const wrap = (begin: string): F => ((...args: unknown[]) => {
+    const wrap = (writeLock: boolean): F => ((...args: unknown[]) => {
       this.assertOpen();
       const depth = this.txDepth;
       const savepoint = `od_tx_${depth}`;
       const outer = depth === 0 && !this.manualTx;
-      call({ op: 'exec', handle: this.handle, sql: outer ? begin : `SAVEPOINT ${savepoint}` }, null);
+      this.send({ op: 'exec', sql: outer ? 'BEGIN' : `SAVEPOINT ${savepoint}` }, null);
+      if (outer && writeLock) {
+        // A separate step, so a lock timeout leaves a transaction we can (and
+        // always do) roll back instead of an aborted one nobody owns.
+        try {
+          this.send({ op: 'query', sql: WRITE_LOCK_SQL, params: [], savepoint: false }, WRITE_LOCK_SQL);
+        } catch (error) {
+          this.rollbackQuietly('ROLLBACK');
+          throw error;
+        }
+      }
       this.txDepth += 1;
       let result: unknown;
       try {
@@ -327,29 +462,21 @@ export class SqlDatabase {
         }
       } catch (error) {
         this.txDepth -= 1;
-        try {
-          call({
-            op: 'exec',
-            handle: this.handle,
-            sql: outer ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`,
-          }, null);
-        } catch {
-          // The original error is the one worth surfacing.
-        }
+        this.rollbackQuietly(outer ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
         throw error;
       }
       this.txDepth -= 1;
-      call({ op: 'exec', handle: this.handle, sql: outer ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}` }, null);
+      this.send({ op: 'exec', sql: outer ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}` }, null);
       return result;
     }) as F;
-    const tx = wrap('BEGIN') as SqlTransaction<F>;
+    const tx = wrap(false) as SqlTransaction<F>;
     tx.default = tx;
     tx.deferred = tx;
     // SQLite's IMMEDIATE/EXCLUSIVE take the database write lock before the
     // first read. The equivalent here is a per-schema transaction-scoped
     // advisory lock, so read-then-write sequences stay serialized across
     // connections (other daemon replicas, a second handle in tests).
-    tx.immediate = wrap(WRITE_LOCK_BEGIN);
+    tx.immediate = wrap(true);
     tx.exclusive = tx.immediate;
     return tx;
   }
@@ -357,8 +484,10 @@ export class SqlDatabase {
   close(): this {
     if (!this.isOpen) return this;
     this.isOpen = false;
+    const b = bridge;
+    if (!b || b.dead || b.generation !== this.generation) return this;
     try {
-      call({ op: 'close', handle: this.handle }, null);
+      call(b, { op: 'close', handle: this.handle }, null);
     } catch {
       // Closing a handle whose connection already died is not an error.
     }

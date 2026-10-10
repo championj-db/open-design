@@ -73,6 +73,20 @@ function parseSslMode(value: string | undefined, fallback: PgSslMode): PgSslMode
   );
 }
 
+/**
+ * Lakebase requires TLS, and its password is a live OAuth credential: never
+ * let PGSSLMODE downgrade it below `require`.
+ */
+function lakebaseSslMode(value: string | undefined): PgSslMode {
+  const mode = parseSslMode(value, 'require');
+  if (mode !== 'require' && mode !== 'verify-full') {
+    throw new DaemonDbConfigError(
+      `PGSSLMODE '${clean(value)}' is not allowed for Lakebase; use require or verify-full.`,
+    );
+  }
+  return mode;
+}
+
 function parsePort(value: string | undefined): number {
   const raw = clean(value);
   if (!raw) return 5432;
@@ -141,7 +155,7 @@ function resolveConnection(e: Record<string, string | undefined>): DaemonDbConfi
       port: parsePort(e.PGPORT),
       database: clean(e.PGDATABASE) ?? 'databricks_postgres',
       user,
-      sslMode: parseSslMode(e.PGSSLMODE, 'require'),
+      sslMode: lakebaseSslMode(e.PGSSLMODE),
       schema,
       lakebase: {
         source,

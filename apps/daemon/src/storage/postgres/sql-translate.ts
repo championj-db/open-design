@@ -18,7 +18,8 @@
 //   - CAST(x AS INTEGER|REAL) -> BIGINT / DOUBLE PRECISION (SQLite widths).
 //   - mixed-case identifiers (`AS projectId`) are quoted so Postgres keeps
 //     their case the way SQLite does.
-//   - two-or-more-argument MAX()/MIN() -> GREATEST()/LEAST().
+//   - two-or-more-argument MAX()/MIN() keep SQLite's scalar semantics,
+//     including NULL if any argument is NULL (not GREATEST/LEAST).
 //   - IFNULL( -> COALESCE(, `==` -> `=`, `backtick` identifiers -> "double".
 //
 // Text inside string literals, quoted identifiers and comments is untouched.
@@ -225,6 +226,9 @@ export function translateSql(sql: string): TranslatedSql {
   const out: Token[] = [];
   const bindings: Array<number | string> = [];
   const orders: OrderClause[] = [];
+  // Depths (inside the parens) of multi-argument MAX/MIN calls being rewritten.
+  const scalarFrames: number[] = [];
+  let scalarPending = false;
   let depth = 0;
 
   // Finish the ORDER BY item spanning out[clause.itemStart..end).
@@ -261,6 +265,14 @@ export function translateSql(sql: string): TranslatedSql {
     const word = upper(token);
     const current = orders[orders.length - 1];
 
+    if (
+      token.kind === 'punct' && token.text === ','
+      && scalarFrames.length > 0 && scalarFrames[scalarFrames.length - 1] === depth
+    ) {
+      out.push({ kind: 'ws', text: '), (' });
+      continue;
+    }
+
     if (current && current.depth === depth) {
       if (token.text === ';' || (word && ORDER_TERMINATORS.has(word))) {
         closeOrders(depth);
@@ -275,12 +287,20 @@ export function translateSql(sql: string): TranslatedSql {
     if (token.kind === 'punct' && token.text === '(') {
       depth++;
       out.push(token);
+      if (scalarPending) {
+        scalarFrames.push(depth);
+        scalarPending = false;
+      }
       continue;
     }
     if (token.kind === 'punct' && token.text === ')') {
       closeOrders(depth);
-      depth--;
       out.push(token);
+      if (scalarFrames.length > 0 && scalarFrames[scalarFrames.length - 1] === depth) {
+        scalarFrames.pop();
+        out.push({ kind: 'ws', text: ') AS od_scalar(od_v))' });
+      }
+      depth--;
       continue;
     }
 
@@ -322,8 +342,17 @@ export function translateSql(sql: string): TranslatedSql {
       continue;
     }
     if ((word === 'MAX' || word === 'MIN') && hasTopLevelComma(tokens, index)) {
-      // SQLite's multi-argument max()/min() are scalar functions.
-      out.push({ kind: 'word', text: word === 'MAX' ? 'GREATEST' : 'LEAST' });
+      // SQLite's multi-argument max()/min() are scalar functions that return
+      // NULL when ANY argument is NULL; GREATEST/LEAST would skip NULLs. Fold
+      // the arguments as rows instead, each argument appearing exactly once
+      // (so placeholders keep one binding each):
+      //   (SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE max(od_v) END
+      //      FROM (VALUES (a), (b)) AS od_scalar(od_v))
+      out.push({
+        kind: 'ws',
+        text: `(SELECT CASE WHEN bool_or(od_v IS NULL) THEN NULL ELSE ${word}(od_v) END FROM (VALUES `,
+      });
+      scalarPending = true;
       continue;
     }
     if (word === 'IFNULL' && nextSig(index, 1)?.text === '(') {
