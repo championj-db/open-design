@@ -2,8 +2,12 @@
 
 > Authoritative-enough starting contracts gathered from Databricks docs (Oct 2026).
 > Treat exact endpoint paths/model ids as **verify-against-the-live-workspace**, not gospel —
-> the workspace is `https://dbc-a5d4177a-49dc.cloud.databricks.com`. Where a detail is
+> use the workspace host provided to the app at runtime (`https://<your-workspace-host>`;
+> the initial deployment targets `dbc-a5d4177a-49dc.cloud.databricks.com`). Where a detail is
 > uncertain, probe the running Apps environment / `databricks` CLI before hardcoding.
+>
+> NOTE: this reference describes the migration's **target** architecture (all waves). Any
+> "removed/replaced" statement is the end-state; see `README.md` for what has actually shipped per wave.
 
 This app is **Node.js 24 / TypeScript (pnpm monorepo)**, Express daemon serving a static
 Next.js export. All patterns below must be implemented in TS, not Python.
@@ -60,8 +64,9 @@ Next.js export. All patterns below must be implemented in TS, not Python.
     existing `@anthropic-ai/sdk` streaming/tool-use path with minimal reshaping.
 - Discover available endpoints dynamically: `GET https://<host>/api/2.0/serving-endpoints` (list), rather than
   hardcoding one model. Pick a Claude-family endpoint as the default "Claude Code replacement" brain.
-- The former agent-CLI orchestration (spawn `claude`/`codex`/etc via node-pty) is **removed**; the daemon itself
-  becomes the agent harness: it runs the chat/tool loop in-process and calls serving endpoints for model turns.
+- The former agent-CLI orchestration (spawn `claude`/`codex`/etc via node-pty) is **replaced in the AI wave**:
+  the daemon itself becomes the agent harness, running the chat/tool loop in-process and calling serving
+  endpoints for model turns. (Still present until that wave lands — see `README.md` for current status.)
 
 ## 5. Artifact storage (Wave 3) — Unity Catalog Volumes replaces local `.od/projects/`
 - Relational state → Lakebase; **files/artifacts → UC Volumes** via the existing `S3ProjectStorage` seam

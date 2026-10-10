@@ -21,6 +21,12 @@ Model Serving, UC Volumes, removal list) live in
   Wave 1, `app.yaml` sets `OD_DISABLE_API_AUTH=1` (the daemon's existing
   trusted-reverse-proxy mode), because a non-loopback bind otherwise requires
   `OD_API_TOKEN`.
+- Browser API calls: the daemon's origin check currently accepts only
+  loopback/LAN hosts, so requests from the app's `https://<app-name>.<...>.databricksapps.com`
+  origin will be rejected until that host is allowlisted. As an interim measure
+  add it via `OD_ALLOWED_ORIGINS` (comma-separated) in `app.yaml` `env`, e.g.
+  `OD_ALLOWED_ORIGINS=https://<app-name>.<region>.databricksapps.com`. The auth
+  wave will fold Databricks app origins into the check natively.
 
 ## Building the bundle
 
