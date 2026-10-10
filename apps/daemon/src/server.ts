@@ -1216,7 +1216,6 @@ import {
 } from './plugins/share-helpers.js';
 import { sanitizeArchiveFilename } from './projects/archive-filename.js';
 import { requireLocalDaemonRequest } from './http/local-daemon-request.js';
-import { renderOAuthResultPage } from './http/oauth-result-page.js';
 import { bearerTokenFromRequest, createToolRequestAuth } from './http/tool-request-auth.js';
 
 /**
