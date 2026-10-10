@@ -1263,6 +1263,25 @@ export function getWorkspaceResourceByResourceId(
     .get(resourceType, resourceId) as DbRow | undefined;
 }
 
+/**
+ * Every binding of one resource type, keyed by resource id: the bulk form of
+ * {@link getWorkspaceResourceByResourceId} for list endpoints that would
+ * otherwise issue one lookup per resource (a database round trip each).
+ */
+export function mapWorkspaceResourcesByResourceId(
+  db: SqliteDb,
+  resourceType: string,
+): Map<string, DbRow> {
+  const rows = db
+    .prepare(
+      `SELECT ${WORKSPACE_RESOURCE_SELECT_COLUMNS}
+         FROM workspace_resources
+        WHERE resource_type = ?`,
+    )
+    .all(resourceType) as DbRow[];
+  return new Map(rows.map((row) => [String(row.resourceId), row]));
+}
+
 export function listWorkspaceResources(db: SqliteDb, resourceType: string, workspaceId: string) {
   return db
     .prepare(

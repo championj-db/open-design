@@ -125,7 +125,7 @@ function call(request: Record<string, unknown>, sql: string | null): unknown {
   const b = getBridge();
   const id = b.nextId++;
   if (traceEnabled) {
-    const text = String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, 80);
+    const text = String(sql ?? request.sql ?? '').replace(/\s+/g, ' ').slice(0, Number(process.env.OD_PG_TRACE_WIDTH) || 80);
     process.stderr.write(`[pg-trace] ${Date.now()} #${id} ${String(request.op)} h${String(request.handle)} ${text}\n`);
   }
   // Request ids grow monotonically, so the flag only ever moves forward and

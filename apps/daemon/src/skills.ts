@@ -13,7 +13,7 @@ import type { SqlDatabase } from "./storage/postgres/sql-database.js";
 import { parseFrontmatter } from "./design-systems/frontmatter.js";
 import type { SkillCritiquePolicy } from "./critique/rollout.js";
 import { skillCwdAliasSegment, SKILLS_CWD_ALIAS } from "./cwd-aliases.js";
-import { getWorkspaceResourceByResourceId } from "./db.js";
+import { getWorkspaceResourceByResourceId, mapWorkspaceResourcesByResourceId } from "./db.js";
 
 type SqliteDb = SqlDatabase;
 
@@ -425,11 +425,12 @@ export async function listSkills(
   // row of its own — only the parent skill is ever bound (see
   // `importUserSkill`'s caller) — so resolve derived ids back to their
   // parent before checking visibility.
+  const bindings = mapWorkspaceResourcesByResourceId(scopeDb, "skill");
   return out
     .map((entry) => {
       const derived = splitDerivedSkillId(entry.id);
       const bindingId = derived ? derived.parentId : entry.id;
-      return { entry, binding: getWorkspaceResourceByResourceId(scopeDb, "skill", bindingId) };
+      return { entry, binding: bindings.get(bindingId) };
     })
     .filter(({ entry, binding }) =>
       skillVisibleFromBinding(
