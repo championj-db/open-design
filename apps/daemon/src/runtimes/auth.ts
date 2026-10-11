@@ -387,7 +387,8 @@ const SEVERITY_LABELS = new Set([
  */
 export const OWN_AGENT_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'agy', 'aider', 'amp', 'amr', 'antigravity', 'atomcode', 'byok-opencode',
-  'claude', 'codebuddy', 'codex', 'copilot', 'cursor-agent', 'deepseek',
+  'claude', 'codebuddy', 'codex', 'copilot', 'cursor-agent', 'databricks',
+  'databricks-model-serving', 'deepseek',
   'deepseek-harness', 'devin', 'dsh', 'grok', 'grok-build', 'hermes', 'kilo',
   'kimi', 'kiro', 'kiro-cli', 'mimo', 'opencode', 'opencode-cli', 'pi',
   'qoder', 'qodercli', 'qwen', 'reasonix', 'trae-cli', 'traecli', 'vela',

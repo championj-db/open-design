@@ -570,6 +570,7 @@ async function probe(
   // Forget what a previous pass proved unusable before re-probing: a rescan
   // after the user repairs or reinstalls a CLI must not keep skipping it.
   forgetUnusableExecutables(def.id);
+  if (def.inProcess) return probeInProcessAgent(def, configuredEnv);
   // Detection must probe the exact path the runtime will spawn, not just the
   // PATH-visible shim. This is load-bearing for Codex under nvm/fnm/mise:
   // the discovered `codex` entry is often a `#!/usr/bin/env node` wrapper
@@ -788,6 +789,25 @@ async function probe(
   };
 }
 
+// In-process runtimes have no binary to resolve or version to probe; they
+// are available whenever the daemon is, and their models come straight from
+// `fetchModels` (the Databricks agent lists Model Serving endpoints).
+async function probeInProcessAgent(
+  def: RuntimeAgentDef,
+  configuredEnv: Record<string, string>,
+): Promise<DetectedAgent> {
+  const env = { ...process.env, ...(def.env || {}), ...configuredEnv };
+  const modelResult = await fetchModels(def, def.bin, env);
+  return {
+    ...stripFns(def),
+    models: modelResult.models,
+    modelsSource: modelResult.source,
+    available: true,
+    version: null,
+    ...installMetaForAgent(def.id, configuredEnv),
+  };
+}
+
 function stripFns(
   def: RuntimeAgentDef,
 ): Omit<DetectedAgent, 'models' | 'modelsSource' | 'available' | 'path' | 'version'> {
@@ -855,17 +875,20 @@ function rememberDetectedLiveModels(
   rememberLiveModels(agent.id, agent.models, scope);
 }
 
+// `defs` defaults to the registry; tests pass the full def catalog to keep
+// exercising the unregistered CLI defs' probes (see `runtimes/registry.ts`).
 export async function detectAgents(
   configuredEnvByAgent: Record<string, Record<string, string>> = {},
+  defs: RuntimeAgentDef[] = AGENT_DEFS,
 ) {
   const results = await Promise.all(
-    AGENT_DEFS.map((def) => detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id))),
+    defs.map((def) => detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id))),
   );
   // Refresh the validation cache from whatever we just surfaced to the UI
   // so /api/chat can accept any model the user could have just picked,
   // including ones that only showed up after a CLI re-auth.
   for (const [index, agent] of results.entries()) {
-    const def = AGENT_DEFS[index];
+    const def = defs[index];
     if (!def) continue;
     rememberDetectedLiveModels(def, configuredEnvForAgent(configuredEnvByAgent, def.id), agent);
   }
@@ -880,8 +903,9 @@ export async function detectAgents(
 // that don't care about incremental delivery (cache warm, analytics, chat).
 export async function* detectAgentsStream(
   configuredEnvByAgent: Record<string, Record<string, string>> = {},
+  defs: RuntimeAgentDef[] = AGENT_DEFS,
 ): AsyncGenerator<DetectedAgent> {
-  const tagged = AGENT_DEFS.map((def, index) =>
+  const tagged = defs.map((def, index) =>
     detectAgent(def, configuredEnvForAgent(configuredEnvByAgent, def.id)).then((agent) => {
       rememberDetectedLiveModels(def, configuredEnvForAgent(configuredEnvByAgent, def.id), agent);
       return { index, agent };

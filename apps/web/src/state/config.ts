@@ -1,6 +1,6 @@
 import type { AppConfigPrefs } from '@open-design/contracts';
 import { MEDIA_PROVIDERS } from '../media/models';
-import { isOpenAICompatible } from '../providers/openai-compatible';
+import { isOpenAICompatible } from '../utils/legacyApiProtocol';
 import type {
   ApiProtocol,
   ApiProtocolConfig,
@@ -74,6 +74,21 @@ export const DEFAULT_ORBIT: OrbitConfig = {
   templateSkillId: 'orbit-general',
 };
 
+/**
+ * The only chat agent on Databricks: the daemon's in-process Model Serving
+ * harness. BYOK ('api' mode) and the spawned CLI agents are gone, so every
+ * config is pinned to daemon mode with this agent.
+ */
+export const DATABRICKS_AGENT_ID = 'databricks';
+
+/** Pin `config` to the Databricks agent. Returns true when it changed anything. */
+export function pinDatabricksAgent(config: AppConfig): boolean {
+  const changed = config.mode !== 'daemon' || config.agentId !== DATABRICKS_AGENT_ID;
+  config.mode = 'daemon';
+  config.agentId = DATABRICKS_AGENT_ID;
+  return changed;
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   mode: 'daemon',
   apiKey: '',
@@ -87,7 +102,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   apiProtocolConfigs: {},
   configMigrationVersion: CONFIG_MIGRATION_VERSION,
   apiProviderBaseUrl: 'https://api.anthropic.com',
-  agentId: null,
+  agentId: DATABRICKS_AGENT_ID,
   skillId: null,
   designSystemId: null,
   onboardingCompleted: false,
@@ -803,6 +818,8 @@ export function loadConfig(): AppConfig {
       merged.baseUrl = resolveFixedOriginBaseUrl(merged.apiProtocol, merged.baseUrl);
     }
 
+    migratedConfig = pinDatabricksAgent(merged) || migratedConfig;
+
     if (migratedConfig || downgradedUnsupportedChatProtocol) {
       // Best-effort re-persist of the migrated / downgraded config. A localStorage
       // write failure here (quota exceeded, private-mode storage disabled) must not
@@ -1100,6 +1117,7 @@ export function mergeDaemonConfig(
   if (daemonConfig.agentId !== undefined) {
     next.agentId = daemonConfig.agentId;
   }
+  pinDatabricksAgent(next);
   if (daemonConfig.skillId !== undefined) {
     next.skillId = daemonConfig.skillId;
   }

@@ -3,6 +3,7 @@ import {
   assert,
   chmodSync,
   detectAgents,
+  detectAgentsStream,
   join,
   mkdtempSync,
   rmSync,
@@ -10,7 +11,6 @@ import {
   withEnvSnapshot,
   writeFileSync,
 } from './helpers/test-helpers.js';
-import { detectAgentsStream } from '../../src/runtimes/detection.js';
 import { buildAuthDiagnostic } from '../../src/runtimes/diagnostics.js';
 
 const posixTest = process.platform === 'win32' ? test.skip : test;

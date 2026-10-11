@@ -3,6 +3,7 @@ import { VisuallyHidden } from '@open-design/components';
 import { Icon } from './Icon';
 import { useI18n } from '../i18n';
 import {
+  AMR_ACCOUNT_UI_ENABLED,
   cancelVelaLogin,
   fetchVelaLoginStatus,
   startVelaLogin,
@@ -116,6 +117,11 @@ const ACTIVATION_HINT_DELAY_MS = 5000;
  * re-read, which swaps the rail to the signed-in form (unmounting the card).
  */
 export function CloudSignInTip() {
+  // Hidden while the AMR account UI is off (no AMR account on Databricks).
+  return AMR_ACCOUNT_UI_ENABLED ? <CloudSignInTipCard /> : null;
+}
+
+function CloudSignInTipCard() {
   const { t } = useI18n();
   const [state, setState] = useState<TipState>('idle');
   const [status, setStatus] = useState<VelaLoginStatus | null>(null);

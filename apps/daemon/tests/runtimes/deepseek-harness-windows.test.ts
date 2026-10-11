@@ -152,7 +152,11 @@ describe('DeepSeek Harness Windows carrier', () => {
     });
   });
 
-  it('returns configuration guidance from the full connection-test path', async () => {
+  // Skipped on Databricks: the full connection-test path resolves the agent
+  // through the registry, where DeepSeek Harness is no longer registered (the
+  // route answers "unknown agent"). The def-level carrier tests above still
+  // run. Remove with the CLI-runtime strip follow-up.
+  it.skip('returns configuration guidance from the full connection-test path', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'od-dsh-auth-'));
     const previous = {
       PATH: process.env.PATH,

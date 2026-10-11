@@ -41,7 +41,7 @@ import type {
   StrategyTaskProjectionV2,
   WorkspaceCollabContext,
 } from '@open-design/contracts';
-import type { StreamHandlers } from './anthropic';
+import type { StreamHandlers } from './stream-handlers';
 
 /**
  * 取消来源的四个合法值。服务端说了才算,说不清就不认 —— UI 把 `user_stop`
@@ -58,10 +58,7 @@ function isRunCancelOrigin(value: unknown): value is RunCancelOrigin {
   return typeof value === 'string' && RUN_CANCEL_ORIGINS.has(value);
 }
 import { workspaceProjectHeaders } from '../state/projects';
-import { setRuntimeAmrConsoleOrigin } from '../runtime/amr-guidance';
 import { canRetainSuccessfulRunForBlockedStrategy } from '../runtime/blocked-strategy-result';
-import { coalescedGet } from '../lib/coalesced-get';
-import { currentWorkspaceAccountGeneration } from '../collab/workspace-identity';
 
 /**
  * Returns the front-end carrier that's about to send this request:
@@ -1387,11 +1384,6 @@ export interface VelaLoginAuthStage {
   errorKind?: AmrAuthErrorKind;
 }
 
-// AMR (vela) login surfaces three thin endpoints on the daemon:
-//   GET  /api/integrations/vela/status   — read ~/.amr/config.json projection
-//   POST /api/integrations/vela/login    — spawn `vela login` (vela opens browser itself)
-//   POST /api/integrations/vela/login/cancel — terminate a still-pending login
-//   POST /api/integrations/vela/logout   — clear ~/.amr auth and Settings-backed AMR auth env
 // The Settings UI polls /status after kicking off /login to detect completion.
 /** One `/api/integrations/vela/status` response, before any owner interprets it. */
 export interface VelaLoginStatusRead {
@@ -1401,89 +1393,34 @@ export interface VelaLoginStatusRead {
   readonly body: unknown;
 }
 
-/**
- * The ONE transport read of the AMR status projection.
- *
- * Three independent owners ask the daemon this same question on a cold open,
- * and none of them can drop its read: `App` drives analytics identity and the
- * model refresh, `MessageCenter` drives its signed-in/anonymous message split,
- * `ChatPane` drives the inline sign-in pill. Measured on one cold conversation
- * open they produced SEVEN requests — three, two and two, each owner's effect
- * replayed while the previous request was still open.
- *
- * So they share the request, not the state: this returns the raw response and
- * every owner keeps its own mapping (see `fetchVelaLoginStatus` and
- * `isAmrLoggedIn`, which disagree about what a non-ok status means).
- *
- * SINGLE-FLIGHT ONLY (ttl 0). Nothing is retained once a read settles, so no
- * caller can ever be handed a projection it did not itself trigger — this can
- * only remove a request the browser would have opened concurrently with an
- * identical one. That matters here: `refresh: true` exists precisely to make
- * the daemon re-probe after the user returned from the browser sign-in, and a
- * shared settled answer would defeat it. It cannot, because `?refresh=1` is a
- * different URL and therefore a different key.
- *
- * The key also carries the account generation. This endpoint sends no Workspace
- * headers — it is an ACCOUNT-level projection of `~/.amr/config.json` — so the
- * account boundary IS its scope. A sign-out/sign-in leaves the URL identical
- * while the authority behind it changed, and ttl 0 does not catch that: it
- * stops settled-result reuse, not a post-boundary reader joining a request
- * issued before the boundary. Captured once, up front, before any await.
- */
+// The Vela/AMR account endpoints (`/api/integrations/vela/*`, `/api/amr/models`)
+// were removed from the daemon: on Databricks the identity is the OBO user and
+// models come from Model Serving. Every Vela/AMR client helper below is a
+// no-network stub with a stable signed-out answer, so no retained control can
+// reach a deleted route, and the AMR account UI is hidden behind
+// `AMR_ACCOUNT_UI_ENABLED`.
+
+/** AMR (vela) sign-in / account UI. Off: there is no AMR account on Databricks. */
+export const AMR_ACCOUNT_UI_ENABLED = false;
+
+const AMR_ACCOUNT_UNAVAILABLE = 'AMR sign-in is not available in this deployment';
+
 export function readVelaLoginStatus(
-  options: { refresh?: boolean } = {},
+  _options: { refresh?: boolean } = {},
 ): Promise<VelaLoginStatusRead> {
-  const query = options.refresh ? '?refresh=1' : '';
-  const url = `/api/integrations/vela/status${query}`;
-  const accountGeneration = currentWorkspaceAccountGeneration();
-  return coalescedGet(
-    `vela-login-status:${accountGeneration}:${url}`,
-    async (): Promise<VelaLoginStatusRead> => {
-      const resp = await fetch(url, { cache: 'no-store' });
-      const body = await resp.json().catch(() => null);
-      return { ok: resp.ok, httpStatus: resp.status, body };
-    },
-    // ttl 0 — join an open request, retain nothing after it settles.
-    0,
-  );
+  return Promise.resolve({ ok: false, httpStatus: 404, body: null });
 }
 
-export async function fetchVelaLoginStatus(options: { refresh?: boolean } = {}): Promise<VelaLoginStatus | null> {
-  try {
-    const read = await readVelaLoginStatus(options);
-    if (!read.ok) return null;
-    const status = read.body as VelaLoginStatus;
-    // Every AMR status read refreshes the runtime console origin, so the console
-    // links stay correct no matter which surface (login pill, model switcher,
-    // avatar menu, low-balance dialog) triggered the fetch. Doing it here rather
-    // than in each caller is what keeps the origin out of web source: no caller
-    // needs to know the hostname of the environment it is pointed at.
-    setRuntimeAmrConsoleOrigin(status.consoleOrigin);
-    return status;
-  } catch {
-    return null;
-  }
+export async function fetchVelaLoginStatus(_options: { refresh?: boolean } = {}): Promise<VelaLoginStatus | null> {
+  return null;
 }
 
-export async function fetchAmrWalletSnapshot(options: { refresh?: boolean } = {}): Promise<AmrWalletSnapshot | null> {
-  try {
-    const query = options.refresh ? '?refresh=1' : '';
-    const resp = await fetch(`/api/integrations/vela/wallet${query}`, { cache: 'no-store' });
-    if (!resp.ok) return null;
-    return (await resp.json()) as AmrWalletSnapshot;
-  } catch {
-    return null;
-  }
+export async function fetchAmrWalletSnapshot(_options: { refresh?: boolean } = {}): Promise<AmrWalletSnapshot | null> {
+  return null;
 }
 
 export async function fetchAmrModels(): Promise<AmrModelsResponse | null> {
-  try {
-    const resp = await fetch('/api/amr/models', { cache: 'no-store' });
-    if (!resp.ok) return null;
-    return (await resp.json()) as AmrModelsResponse;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export interface StartVelaLoginResult {
@@ -1498,98 +1435,25 @@ export interface StartVelaLoginResult {
   fallbackUsed?: boolean;
 }
 
+/** No-network stub: AMR sign-in does not exist on Databricks; never starts a login. */
 export async function startVelaLogin(
-  attribution?: AmrEntryAttribution | null,
-  odDeviceId?: string | null,
-  authAttemptId?: string,
+  _attribution?: AmrEntryAttribution | null,
+  _odDeviceId?: string | null,
+  _authAttemptId?: string,
 ): Promise<StartVelaLoginResult> {
-  try {
-    const loginAttribution =
-      attribution && odDeviceId ? { ...attribution, odDeviceId } : attribution;
-    const canonicalAuthAttemptId = authAttemptId
-      && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authAttemptId)
-      ? authAttemptId
-      : null;
-    const authRequestId = authAttemptId
-      && /^pending-amr-auth-[a-z0-9]+-[a-z0-9]+$/.test(authAttemptId)
-      ? authAttemptId
-      : null;
-    const payload = {
-      ...(loginAttribution ? { attribution: loginAttribution } : {}),
-      ...(canonicalAuthAttemptId ? { authAttemptId: canonicalAuthAttemptId } : {}),
-      ...(authRequestId ? { authRequestId } : {}),
-    };
-    const resp = await fetch('/api/integrations/vela/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const body = (await resp.json().catch(() => null)) as Omit<
-      StartVelaLoginResult,
-      'ok' | 'status' | 'alreadyRunning'
-    > | null;
-    if (resp.ok) {
-      return { ok: true, status: resp.status, ...(body ?? {}) };
-    }
-    return {
-      ok: false,
-      status: resp.status,
-      alreadyRunning: resp.status === 409,
-      error: body?.error ?? '',
-      ...(body?.authAttemptId ? { authAttemptId: body.authAttemptId } : {}),
-      ...(body?.authStages ? { authStages: body.authStages } : {}),
-      ...(body?.authRoute ? { authRoute: body.authRoute } : {}),
-      ...(body?.fallbackUsed !== undefined
-        ? { fallbackUsed: body.fallbackUsed }
-        : {}),
-    };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  }
+  return { ok: false, status: 404, error: AMR_ACCOUNT_UNAVAILABLE };
 }
 
+/** No-network stub: there is never a pending AMR login to cancel. */
 export async function cancelVelaLogin(
-  authAttemptId?: string,
+  _authAttemptId?: string,
 ): Promise<{ ok: boolean; canceled?: boolean }> {
-  const hasTarget = authAttemptId !== undefined;
-  const canonicalAuthAttemptId = authAttemptId
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authAttemptId)
-    ? authAttemptId
-    : null;
-  const authRequestId = authAttemptId
-    && /^pending-amr-auth-[a-z0-9]+-[a-z0-9]+$/.test(authAttemptId)
-    ? authAttemptId
-    : null;
-  if (hasTarget && !canonicalAuthAttemptId && !authRequestId) {
-    return { ok: false };
-  }
-  try {
-    const resp = await fetch('/api/integrations/vela/login/cancel', {
-      method: 'POST',
-      ...(hasTarget
-        ? {
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(canonicalAuthAttemptId
-              ? { authAttemptId: canonicalAuthAttemptId }
-              : { authRequestId }),
-          }
-        : {}),
-    });
-    if (!resp.ok) return { ok: false };
-    const body = (await resp.json().catch(() => null)) as { canceled?: boolean } | null;
-    return { ok: true, canceled: body?.canceled };
-  } catch {
-    return { ok: false };
-  }
+  return { ok: true, canceled: false };
 }
 
+/** No-network stub: there is never an AMR session to sign out of. */
 export async function velaLogout(): Promise<{ ok: boolean }> {
-  try {
-    const resp = await fetch('/api/integrations/vela/logout', { method: 'POST' });
-    return { ok: resp.ok };
-  } catch {
-    return { ok: false };
-  }
+  return { ok: true };
 }
 
 // Forwards the user's assistant-turn rating to the daemon so it can emit

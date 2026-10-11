@@ -85,33 +85,17 @@ describe('amr-auth single-flight tracking', () => {
     });
   });
 
-  it('uses the pending no-WebCrypto request id to start and cancel safely', async () => {
+  it('uses the pending no-WebCrypto request id without calling the removed login routes', async () => {
     vi.stubGlobal('crypto', undefined);
     const authRequestId = beginAmrAuthTracking(null);
     expect(authRequestId).toMatch(/^pending-amr-auth-[a-z0-9]+-[a-z0-9]+$/);
-    const canonicalId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 202,
-        json: async () => ({ authAttemptId: canonicalId }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ canceled: true }),
-      });
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await startVelaLogin(null, null, authRequestId);
-    await cancelVelaLogin(authRequestId);
+    await expect(startVelaLogin(null, null, authRequestId)).resolves.toMatchObject({ ok: false });
+    await expect(cancelVelaLogin(authRequestId)).resolves.toEqual({ ok: true, canceled: false });
 
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
-      authRequestId,
-    });
-    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
-      authRequestId,
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
     resolveAmrAuthTracking(() => undefined, 'cancelled', undefined, {
       authAttemptId: authRequestId,
     });

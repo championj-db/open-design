@@ -26,7 +26,7 @@ import type {
   RunEventForDiagnostics,
 } from '../run-diagnostics.js';
 import type { RunEventForFailureClassification } from '../run-failure-classification.js';
-import type { RunWorkspaceScope } from './project-amr-trace-env.js';
+import type { RunWorkspaceScope } from './run-workspace-scope.js';
 import type { OdNextRolloutDecision } from '../strategies/od-next/rollout.js';
 import type { OdNextTaskInputSnapshotDescriptor } from '../strategies/od-next/task-input-snapshot.js';
 import type { RunTerminalLifecycleV1 } from '../observability/run-terminal-lifecycle.js';

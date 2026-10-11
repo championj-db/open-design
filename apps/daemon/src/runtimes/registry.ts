@@ -1,4 +1,3 @@
-import { amrAgentDef } from './defs/amr.js';
 import { claudeAgentDef } from './defs/claude.js';
 import { codexAgentDef } from './defs/codex.js';
 import { devinAgentDef } from './defs/devin.js';
@@ -25,20 +24,19 @@ import { codebuddyAgentDef } from './defs/codebuddy.js';
 import { reasonixAgentDef } from './defs/reasonix.js';
 import { mimoAgentDef } from './defs/mimo.js';
 import { atomcodeAgentDef } from './defs/atomcode.js';
+import { databricksAgentDef } from './defs/databricks.js';
 import { readLocalAgentProfileDefs as readLocalAgentProfileDefsFromFile } from './local-profiles.js';
 import type { RuntimeAgentDef } from './types.js';
 
 /**
- * The agents this build ships, before anything a particular machine adds.
+ * The CLI-spawning runtimes OpenDesign shipped before the Databricks agent.
  *
- * `AGENT_DEFS` below appends whatever local profiles the user has declared, so
- * it answers "what can this machine run" — a different question from "what do
- * we ship", and the wrong list for anything that must hold everywhere. A local
- * profile id is required not to collide with one of these (see
- * `createLocalAgentDef`), so it is always an id we have never heard of.
+ * NOT registered: on Databricks the only agent is the in-process Databricks
+ * Model Serving harness, so none of these is selectable, detected, or spawned.
+ * The def files stay in place for a follow-up strip task that removes them
+ * (and their stream parsers) wholesale.
  */
-export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
-  amrAgentDef,
+export const UNREGISTERED_CLI_AGENT_DEFS: RuntimeAgentDef[] = [
   claudeAgentDef,
   codexAgentDef,
   devinAgentDef,
@@ -67,16 +65,22 @@ export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
   atomcodeAgentDef,
 ];
 
+/**
+ * The agents this build ships: only the in-process Databricks agent.
+ *
+ * `AGENT_DEFS` below is the same list. Local agent profiles (which wrap a
+ * user-installed CLI) are not loaded, since they would reopen a spawned,
+ * non-Databricks model path.
+ */
+export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [databricksAgentDef];
+
 export function readLocalAgentProfileDefs(
   baseDefs: RuntimeAgentDef[] = SHIPPED_AGENT_DEFS,
 ): RuntimeAgentDef[] {
   return readLocalAgentProfileDefsFromFile(baseDefs);
 }
 
-export const AGENT_DEFS: RuntimeAgentDef[] = [
-  ...SHIPPED_AGENT_DEFS,
-  ...readLocalAgentProfileDefs(SHIPPED_AGENT_DEFS),
-];
+export const AGENT_DEFS: RuntimeAgentDef[] = [...SHIPPED_AGENT_DEFS];
 
 const ids = new Set();
 for (const def of AGENT_DEFS) {

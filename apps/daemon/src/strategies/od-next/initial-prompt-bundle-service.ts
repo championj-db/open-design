@@ -39,7 +39,7 @@ import {
   resolveResearchCommandContract,
 } from '../../runtimes/chat-prompt-inputs.js';
 import { renderRunContextPrompt } from '../../runtimes/chat-run-context.js';
-import type { RunWorkspaceScope } from '../../runtimes/project-amr-trace-env.js';
+import type { RunWorkspaceScope } from '../../runtimes/run-workspace-scope.js';
 import type { RuntimeAgentDef } from '../../runtimes/types.js';
 import type { DetectedRuntimeVersions } from '../../runtimes/detection.js';
 import {

@@ -1,24 +1,6 @@
-/**
- * OpenAI-compatible API provider. Works with any service that exposes the
- * /v1/chat/completions endpoint (e.g. MiMo, DeepSeek, Groq, Together, etc.).
- *
- * Routes through the daemon proxy to avoid browser CORS issues.
- * BYOK — the key stays on the user's machine.
- */
-import type { AppConfig, ChatMessage } from '../types';
-import type { StreamHandlers } from './anthropic';
-import { streamProxyEndpoint } from './api-proxy';
-
-export async function streamMessageOpenAI(
-  cfg: AppConfig,
-  system: string,
-  history: ChatMessage[],
-  signal: AbortSignal,
-  handlers: StreamHandlers,
-): Promise<void> {
-  return streamProxyEndpoint('/api/proxy/openai/stream', cfg, system, history, signal, handlers);
-}
-
+// Protocol inference for BYOK configs saved before `apiProtocol` existed.
+// BYOK chat is gone on Databricks; this survives only so stored legacy
+// configs still load and label consistently.
 /**
  * Detect whether a model ID / base URL should use the OpenAI-compatible
  * provider rather than the Anthropic SDK.

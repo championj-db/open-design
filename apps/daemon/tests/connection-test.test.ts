@@ -45,8 +45,6 @@ import { listProviderModels } from '../src/integrations/provider-models.js';
 import { readVelaCredentialRevision } from '../src/integrations/vela.js';
 import { startServer } from '../src/server.js';
 import { getRememberedLiveModels, rememberLiveModels } from '../src/runtimes/models.js';
-import { amrModelLoadingCache } from '../src/runtimes/amr-model-cache.js';
-import { buildAmrModelCacheKey } from '../src/runtimes/amr-model-probe.js';
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -214,7 +212,6 @@ beforeAll(async () => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  amrModelLoadingCache.resetForTests();
 });
 
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -2645,73 +2642,6 @@ describe('POST /api/test/connection agent mode', () => {
     }
   });
 
-  it('shares AMR model cache invalidation with connection-test default resolution', async () => {
-    const previousPreset = process.env.FAKE_VELA_MODEL_PRESET_JSON;
-    const previousList = process.env.FAKE_VELA_MODEL_LIST_JSON;
-    const setCatalog = (presetModelId: string, remoteModelId: string) => {
-      process.env.FAKE_VELA_MODEL_PRESET_JSON = JSON.stringify({
-        source: 'preset',
-        data: [{ id: presetModelId, default: true }],
-      });
-      process.env.FAKE_VELA_MODEL_LIST_JSON = JSON.stringify({
-        source: 'remote',
-        data: [{ id: remoteModelId, default: true }],
-      });
-    };
-    try {
-      await withFakeAgent(
-        'vela',
-        `void import(${JSON.stringify(pathToFileURL(FAKE_VELA_FIXTURE).href)});\n`,
-        async () => {
-          const def = getAgentDef('amr');
-          expect(def).toBeDefined();
-          const launch = resolveAgentLaunch(def!, {});
-          expect(launch.launchPath).toBeTruthy();
-          const env = applyAgentLaunchEnv(
-            spawnEnvForAgent(
-              def!.id,
-              {
-                ...process.env,
-                ...(def!.env || {}),
-              },
-              {},
-              undefined,
-              { resolvedBin: launch.selectedPath },
-            ),
-            launch,
-          );
-          const normalProbeCacheKey = buildAmrModelCacheKey({
-            launchPath: launch.launchPath!,
-            env,
-            credentialRevision: readVelaCredentialRevision(env),
-          });
-
-          setCatalog('preset-before-upgrade', 'remote-before-upgrade');
-          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
-            .toMatchObject({ ok: true, kind: 'success', model: 'preset-before-upgrade' });
-
-          for (let attempt = 0; attempt < 20; attempt += 1) {
-            const warmed = await testAgentConnection({ agentId: 'amr', model: 'default' });
-            if (warmed.model === 'remote-before-upgrade') break;
-            await new Promise((resolve) => setTimeout(resolve, 25));
-          }
-          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
-            .toMatchObject({ ok: true, kind: 'success', model: 'remote-before-upgrade' });
-
-          setCatalog('preset-after-upgrade', 'remote-after-upgrade');
-          amrModelLoadingCache.invalidate(normalProbeCacheKey);
-
-          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
-            .toMatchObject({ ok: true, kind: 'success', model: 'preset-after-upgrade' });
-        },
-      );
-    } finally {
-      if (previousPreset === undefined) delete process.env.FAKE_VELA_MODEL_PRESET_JSON;
-      else process.env.FAKE_VELA_MODEL_PRESET_JSON = previousPreset;
-      if (previousList === undefined) delete process.env.FAKE_VELA_MODEL_LIST_JSON;
-      else process.env.FAKE_VELA_MODEL_LIST_JSON = previousList;
-    }
-  });
 
   it('resolves the AMR connection-test scope from the merged launch env', async () => {
     rememberLiveModels('amr', [{ id: 'local-env-model', label: 'local-env-model' }], 'local');

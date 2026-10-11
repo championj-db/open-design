@@ -183,6 +183,8 @@ export function modelIdForTracking(model: string | null | undefined): string {
 // Daemon agent id (apps/daemon/src/agents.ts) → CSV cli_provider_id.
 export function agentIdToTracking(agentId: string | null | undefined): TrackingCliProviderId {
   switch (agentId) {
+    case 'databricks':
+      return 'databricks_model_serving';
     case 'claude':
       return 'claude_code';
     case 'codex':

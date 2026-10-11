@@ -12,10 +12,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { startServer } from '../../src/server.js';
 import { agentProcessRecordPath } from '../../src/runtimes/agent-process.js';
+
+// The suite drives runs through the legacy CLI fakes; see the helper.
+vi.mock('../../src/runtimes/registry.js', async (importOriginal) =>
+  (await import('../helpers/legacy-cli-registry.js')).legacyCliRegistryMock(importOriginal as never));
 
 type StartedServer = { url: string; server: Server; shutdown?: () => Promise<void> | void };
 type StdinReport = { pid: number; stdinIsFile: boolean; bytes: number; hasSentinel: boolean };

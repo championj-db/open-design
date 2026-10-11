@@ -202,7 +202,7 @@ import {
   accountScopedRunWorkspaceScopeForProject,
   pinRunWorkspaceScopeForProject,
   type RunWorkspaceScope,
-} from '../runtimes/project-amr-trace-env.js';
+} from '../runtimes/run-workspace-scope.js';
 import {
   runArtifactCountForRun,
   runDesignSystemCreatedForRun,
