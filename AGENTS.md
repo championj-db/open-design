@@ -20,8 +20,7 @@ This file is the single source of truth for agents entering this repository. Rea
 - Top-level content directories: `skills/` (functional skills the agent invokes mid-task — utilities, briefs, packagers; see `skills/AGENTS.md`), `design-templates/` (rendering catalogue: decks, prototypes, image/video/audio templates; see `design-templates/AGENTS.md` and `specs/current/skills-and-design-templates.md`), `design-systems/` (brand `DESIGN.md` files), `craft/` (universal brand-agnostic craft rules a skill can opt into via `od.craft.requires`), `mocks/` (replay-based mock CLIs for `opencode`/`claude`/`codex`/`gemini`/`cursor-agent`/`deepseek`/`qwen`/`grok`, the ACP family `devin`/`hermes`/`kilo`/`kimi`/`kiro`/`vibe`, and the AMR `vela` CLI (login + models + ACP), built from anonymized Langfuse traces — PATH-overlay drop-in for tests and self-validation; see `mocks/README.md`).
 - `apps/web` is the Next.js 16 App Router + React 18 web runtime; do not restore `apps/nextjs`.
 - `apps/daemon` is the local privileged daemon and `od` bin. It owns `/api/*`, agent spawning, skills, design systems, artifacts, and static serving.
-- `apps/desktop` is the Electron shell; it consumes web/daemon status through the sidecar client boundary.
-- `apps/packaged` is the thin packaged Electron runtime entry; it starts packaged sidecars and owns the `od://` entry glue only.
+- `apps/desktop` and `apps/packaged` (Electron) have been removed. OpenDesign deploys as a Databricks App via the root `app.yaml`; see `docs/databricks-native/README.md`.
 - `apps/closure` owns the independently distributable OpenDesign Closure content. It does not own acquisition, generation state, or shell policy.
 - `packages/contracts` is the pure TypeScript web/daemon app contract layer.
 - `packages/sidecar-proto` owns business DTOs and action names; `packages/sidecar` owns the complete business-agnostic sidecar client boundary and protocol implementation; `packages/platform` owns generic OS process primitives.
@@ -430,7 +429,6 @@ pnpm --filter @open-design/web test
 pnpm --filter @open-design/web build
 pnpm --filter @open-design/daemon test
 pnpm --filter @open-design/daemon build
-pnpm --filter @open-design/desktop build
 pnpm --filter @open-design/tools-dev build
 pnpm --filter @open-design/tools-pack build
 pnpm --filter @open-design/tools-serve build

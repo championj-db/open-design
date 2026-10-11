@@ -2,7 +2,13 @@
 // @ts-nocheck
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { runDaemonCliStartup, startDaemonRuntime } from './daemon-startup.js';
+import {
+  normalizeDaemonBindHost,
+  resolveDaemonBindHost,
+  resolveDaemonPort,
+  runDaemonCliStartup,
+  startDaemonRuntime,
+} from './daemon-startup.js';
 import { runLiveArtifactsMcpServer } from './mcp-live-artifacts-server.js';
 import { runArtifactsCli } from './artifacts-cli.js';
 import { runResource } from './resource-cli.js';
@@ -1057,8 +1063,9 @@ function printRootHelp() {
       project-scoped artifacts without exporting a zip.
 
 Options:
-  --port <n>       Port to listen on (default: 7456, env: OD_PORT).
-  --host <addr>    Interface address to bind to (default: 127.0.0.1, env: OD_BIND_HOST).
+  --port <n>       Port to listen on (default: 7456, env: PORT / DATABRICKS_APP_PORT / OD_PORT).
+  --host <addr>    Interface address to bind to (default: 127.0.0.1, or 0.0.0.0 when
+                   PORT / DATABRICKS_APP_PORT is set; env: OD_BIND_HOST).
                    Set to a specific IP (e.g. a Tailscale address) to restrict access
                    to that interface only.
   --no-open        Do not open the browser after start.
@@ -9238,8 +9245,8 @@ function formatBytes(n) {
 }
 
 async function runDaemonStart(flags) {
-  const port = Number(flags.port ?? process.env.OD_PORT ?? 7456);
-  const host = String(flags.host ?? process.env.OD_BIND_HOST ?? '127.0.0.1').trim() || '127.0.0.1';
+  const port = flags.port != null ? Number(flags.port) : resolveDaemonPort();
+  const host = flags.host != null ? normalizeDaemonBindHost(flags.host) : resolveDaemonBindHost();
   const headless = Boolean(flags.headless || flags['no-open'] || flags['serve-web']);
   const runtime = await startDaemonRuntime({
     host,

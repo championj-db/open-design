@@ -29,10 +29,43 @@ export type DaemonCliStartupParseResult =
   | { ok: false; kind: 'error'; message: string };
 
 export const DEFAULT_DAEMON_BIND_HOST = '127.0.0.1';
+export const DEFAULT_DAEMON_PORT = 7456;
+// Databricks Apps routes traffic from its authenticating proxy to the app
+// container, so the app must listen on every interface.
+export const PLATFORM_DAEMON_BIND_HOST = '0.0.0.0';
 
 export function normalizeDaemonBindHost(input: unknown): string {
   const host = String(input ?? '').trim();
   return host || DEFAULT_DAEMON_BIND_HOST;
+}
+
+function envPort(value: string | undefined): number | null {
+  const port = Number(String(value ?? '').trim());
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+}
+
+/**
+ * Port injected by the hosting platform. Databricks Apps sets both
+ * `DATABRICKS_APP_PORT` and `PORT` for Node apps.
+ */
+export function platformDaemonPort(env: NodeJS.ProcessEnv = process.env): number | null {
+  return envPort(env.PORT) ?? envPort(env.DATABRICKS_APP_PORT);
+}
+
+/** Platform port first, then the local `OD_PORT`, then the default. */
+export function resolveDaemonPort(env: NodeJS.ProcessEnv = process.env): number {
+  return platformDaemonPort(env) ?? envPort(env.OD_PORT) ?? DEFAULT_DAEMON_PORT;
+}
+
+/**
+ * Explicit `OD_BIND_HOST` wins. Otherwise bind every interface when a
+ * platform injected the port (Databricks Apps), and stay on loopback for
+ * local runs.
+ */
+export function resolveDaemonBindHost(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = String(env.OD_BIND_HOST ?? '').trim();
+  if (explicit) return explicit;
+  return platformDaemonPort(env) != null ? PLATFORM_DAEMON_BIND_HOST : DEFAULT_DAEMON_BIND_HOST;
 }
 
 function requiredOptionValue(flag: string, value: string | undefined, label: string): string | DaemonCliStartupParseResult {
@@ -46,8 +79,8 @@ export function parseDaemonCliStartupArgs(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
 ): DaemonCliStartupParseResult {
-  let port = Number(env.OD_PORT) || 7456;
-  let host = normalizeDaemonBindHost(env.OD_BIND_HOST);
+  let port = resolveDaemonPort(env);
+  let host = resolveDaemonBindHost(env);
   let open = true;
 
   for (let i = 0; i < argv.length; i++) {
