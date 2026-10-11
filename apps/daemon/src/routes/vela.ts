@@ -1222,125 +1222,15 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
     }
   });
 
-  app.post('/api/integrations/vela/login', async (req, res) => {
-    // Resolve a request-owned correlation id before any config or spawn work.
-    // A pre-spawn failure must never inherit the previous login's snapshot.
-    const requestAuthAttemptId = parseVelaAuthAttemptId(req.body) ?? randomUUID();
-    const requestAuthRequestId = parseVelaAuthRequestId(req.body);
-    const bodyHasRequestId = Boolean(
-      req.body
-      && typeof req.body === 'object'
-      && !Array.isArray(req.body)
-      && Object.prototype.hasOwnProperty.call(req.body, 'authRequestId'),
-    );
-    if (bodyHasRequestId && !requestAuthRequestId) {
-      res.status(400).json({ error: 'invalid_auth_request_id' });
-      return;
-    }
-    try {
-      const appConfig = await readAppConfig(RUNTIME_DATA_DIR);
-      const configuredEnv = agentCliEnvForAgent(appConfig.agentCliEnv, 'amr');
-      const analyticsContext = readAnalyticsContext(req);
-      const attribution = parseVelaLoginAttribution(req.body);
-      const correlationEnv = pluginLoginCorrelationEnv({
-        body: req.body,
-        analyticsContext,
-        metricsEnabled: appConfig.telemetry?.metrics === true,
-      });
-      let loginAttribution = attribution;
-      if (attribution) {
-        if (analyticsContext && appConfig.telemetry?.metrics === true) {
-          loginAttribution = { ...attribution, odDeviceId: analyticsContext.deviceId };
-        } else {
-          const withoutDeviceId = { ...attribution };
-          delete withoutDeviceId.odDeviceId;
-          loginAttribution = withoutDeviceId;
-        }
-      }
-      // Start device authorization over a direct connection first. The
-      // daemon-local IPv4 proxy (added in #4210 for hosts whose direct
-      // amr-api.open-design.ai edge path is broken, #3726) re-originates the
-      // request through the daemon. Behind a corporate transparent proxy that
-      // hijacks amr-api.open-design.ai onto an internal gateway (e.g.
-      // 飞连/CorpLink → 30.x), that extra hop makes the upstream lose the
-      // client IP and reject device authorization with
-      // "502: Invalid IP address: undefined", even though the direct path
-      // resolves fine. So only fall back to the proxy when the direct child
-      // actually terminates before activation (including after this request
-      // returns) — never merely because it is slow, already activated, or a
-      // login is already in flight.
-      const spawned = await spawnVelaLoginWithFallback({
-        authAttemptId: requestAuthAttemptId,
-        authRequestId: requestAuthRequestId,
-        configuredEnv,
-        attribution: loginAttribution,
-        correlationEnv,
-        proxyApiUrl: velaApiProxyBaseUrl(req, getPublicBaseUrl),
-        // Block until the direct attempt reaches device-auth steady state or
-        // exits/errors before it. If it remains alive beyond this grace, the
-        // attempt supervisor keeps watching after this route returns and owns
-        // a single non-overlapping proxy retry on a later pre-activation exit.
-        waitForActivation: true,
-      });
-      const snapshot = readVelaLoginAttemptSnapshot();
-      res.status(202).json({
-        ...spawned,
-        ...(snapshot.authAttemptId === requestAuthAttemptId ? snapshot : {}),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const status = /already running/i.test(message) ? 409 : 500;
-      const snapshot = readVelaLoginAttemptSnapshot();
-      // 409 intentionally joins the already-running attempt so concurrent UI
-      // initiators can reconcile to its canonical id. Every other failure only
-      // exposes state created for this request; config/read failures before
-      // beginVelaLoginAttempt therefore cannot contaminate analytics.
-      const responseSnapshot = status === 409
-        || snapshot.authAttemptId === requestAuthAttemptId
-        ? snapshot
-        : {};
-      res.status(status).json({
-        error: message,
-        ...responseSnapshot,
-      });
-    }
-  });
-
-  app.post('/api/integrations/vela/login/cancel', (req, res) => {
-    try {
-      const bodyHasAttemptId = Boolean(
-        req.body
-        && typeof req.body === 'object'
-        && !Array.isArray(req.body)
-        && Object.prototype.hasOwnProperty.call(req.body, 'authAttemptId'),
-      );
-      const authAttemptId = parseVelaAuthAttemptId(req.body);
-      const bodyHasRequestId = Boolean(
-        req.body
-        && typeof req.body === 'object'
-        && !Array.isArray(req.body)
-        && Object.prototype.hasOwnProperty.call(req.body, 'authRequestId'),
-      );
-      const authRequestId = parseVelaAuthRequestId(req.body);
-      if (
-        (bodyHasAttemptId && !authAttemptId)
-        || (bodyHasRequestId && !authRequestId)
-        || (bodyHasAttemptId && bodyHasRequestId)
-      ) {
-        res.status(400).json({ error: 'invalid_auth_attempt_id' });
-        return;
-      }
-      // No body remains a compatibility path for older web clients. New
-      // callers always target the attempt they observed so a delayed cancel
-      // can never terminate a newer login.
-      res.json(cancelVelaLogin(
-        authAttemptId ?? undefined,
-        authRequestId ?? undefined,
-      ));
-    } catch (err) {
-      res.status(500).json({ error: String(err) });
-    }
-  });
+  // TODO(ai-wave): Vela/AMR cloud sign-in is not available on Databricks
+  // (users are signed in by the Apps proxy; see auth/databricks-obo.ts). The
+  // endpoints stay registered and fail closed so the web AMR surfaces get an
+  // explicit error until the AI/Model-Serving wave removes AMR end to end.
+  const velaSignInUnavailable = (_req: Request, res: Response) => {
+    res.status(410).json({ error: 'Vela sign-in is not available on Databricks' });
+  };
+  app.post('/api/integrations/vela/login', velaSignInUnavailable);
+  app.post('/api/integrations/vela/login/cancel', velaSignInUnavailable);
 
   app.post('/api/integrations/vela/analytics-entry', async (req, res) => {
     const payload = parseAmrEntryAnalyticsPayload(req.body);

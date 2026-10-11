@@ -29,7 +29,6 @@ import {
   normalizeConversationSessionMode,
 } from '../../db.js';
 import { readMcpConfig, type McpServerConfig } from '../../mcp-config.js';
-import { isTokenExpired, readAllTokens } from '../../mcp-tokens.js';
 import { resolveProjectDir } from '../../projects.js';
 import { getSnapshot } from '../../plugins/snapshots.js';
 import { resolveOdNextStrategyRequestRecipeV2 } from '../../plugins/strategy-recipe.js';
@@ -400,24 +399,10 @@ export function createOdNextInitialPromptBundleService(
       runScopedServers: runScopedMcpServers(meta.toolBundle),
       sandboxMode: deps.sandboxEnabled,
     });
+    // MCP OAuth sign-in was removed with the Databricks auth wave, so no
+    // server is ever OAuth-connected.
     const connectedPromptServerIds = new Set<string>();
-    if (promptTokenServerIds.size > 0) {
-      try {
-        const storedTokens = await readAllTokens(deps.runtimeDataDir);
-        for (const [serverId, token] of Object.entries(storedTokens)) {
-          if (
-            promptTokenServerIds.has(serverId)
-            && typeof token.accessToken === 'string'
-            && token.accessToken.length > 0
-            && !isTokenExpired(token)
-          ) {
-            connectedPromptServerIds.add(serverId);
-          }
-        }
-      } catch (error) {
-        console.warn('[mcp-tokens] prompt freeze read failed:', error);
-      }
-    }
+    void promptTokenServerIds;
     const connectedExternalMcp = enabledPromptMcp
       .filter((server) => connectedPromptServerIds.has(server.id))
       .map((server) => ({ id: server.id, label: server.label }));

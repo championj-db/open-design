@@ -1,4 +1,4 @@
-import type http from 'node:http';
+import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -490,10 +490,21 @@ describe('project preview containment routes', () => {
     expect(borrowedTokenResponse.status).toBe(404);
   });
 
-  it('serves minted preview HTML and assets without bearer headers when API token auth is enabled', async () => {
-    const previousToken = process.env.OD_API_TOKEN;
+  it('serves minted preview HTML and assets without OBO headers when the /api gate is active', async () => {
+    // Stand-in for the workspace SCIM `Me` endpoint the OBO gate consults.
     const token = `preview-token-${randomUUID()}`;
-    process.env.OD_API_TOKEN = token;
+    const scim = http.createServer((req, res) => {
+      const ok = req.headers.authorization === `Bearer ${token}`;
+      res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(ok ? { id: 'preview-user', userName: 'preview@example.com' } : {}));
+    });
+    await new Promise<void>((resolve) => scim.listen(0, '127.0.0.1', resolve));
+    const scimAddress = scim.address();
+    if (!scimAddress || typeof scimAddress === 'string') throw new Error('scim stub did not bind');
+    const previousLocalDevUser = process.env.OD_LOCAL_DEV_USER;
+    const previousHost = process.env.DATABRICKS_HOST;
+    delete process.env.OD_LOCAL_DEV_USER;
+    process.env.DATABRICKS_HOST = `http://127.0.0.1:${scimAddress.port}`;
     let tokenServer: http.Server | undefined;
     let shutdown: (() => Promise<void> | void) | undefined;
     let tokenBaseUrl = '';
@@ -509,7 +520,7 @@ describe('project preview containment routes', () => {
       tokenServer = started.server;
       shutdown = started.shutdown;
       const authHeaders = {
-        authorization: `Bearer ${token}`,
+        'x-forwarded-access-token': token,
         'content-type': 'application/json',
       };
 
@@ -546,7 +557,7 @@ describe('project preview containment routes', () => {
 
       const urlResponse = await fetch(
         `${tokenBaseUrl}/api/projects/${projectId}/preview-url?file=${encodeURIComponent('pages/index.html')}`,
-        { headers: { authorization: `Bearer ${token}` } },
+        { headers: { 'x-forwarded-access-token': token } },
       );
       expect(urlResponse.ok).toBe(true);
       const body = await urlResponse.json() as { url: string };
@@ -571,18 +582,22 @@ describe('project preview containment routes', () => {
         `${tokenBaseUrl}/api/projects/${projectId}/preview/${randomUUID()}/pages/index.html`,
         { headers: { Origin: 'null' } },
       );
-      expect(forgedResponse.status).toBe(404);
+      // An unminted scope is not admitted without a user, so the gate refuses it.
+      expect(forgedResponse.status).toBe(401);
     } finally {
       if (tokenBaseUrl) {
         await fetch(`${tokenBaseUrl}/api/projects/${projectId}`, {
           method: 'DELETE',
-          headers: { authorization: `Bearer ${token}` },
+          headers: { 'x-forwarded-access-token': token },
         }).catch(() => {});
       }
       if (shutdown) await Promise.resolve(shutdown());
       if (tokenServer) await new Promise<void>((resolve) => tokenServer!.close(() => resolve()));
-      if (previousToken === undefined) delete process.env.OD_API_TOKEN;
-      else process.env.OD_API_TOKEN = previousToken;
+      await new Promise<void>((resolve) => scim.close(() => resolve()));
+      if (previousLocalDevUser === undefined) delete process.env.OD_LOCAL_DEV_USER;
+      else process.env.OD_LOCAL_DEV_USER = previousLocalDevUser;
+      if (previousHost === undefined) delete process.env.DATABRICKS_HOST;
+      else process.env.DATABRICKS_HOST = previousHost;
     }
   });
 

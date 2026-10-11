@@ -40,7 +40,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { MEDIA_PROVIDERS } from './models.js';
 import { expandHomePrefix } from '../home-expansion.js';
-import { resolveXAIBearer } from '../integrations/xai-credentials.js';
 import { isSandboxModeEnabled } from '../sandbox-mode.js';
 
 const PROVIDER_IDS = MEDIA_PROVIDERS.map((p) => p.id);
@@ -308,27 +307,14 @@ async function resolveOpenAIAuthFileCredential(): Promise<OAuthCredential | null
 }
 
 async function resolveXAIOAuthCredential(
-  projectRoot: string,
+  _projectRoot: string,
 ): Promise<OAuthCredential | null> {
-  // 1. OD-native xAI OAuth tokens (written by the daemon's own
-  //    xai-oauth.ts client when the user authorizes inside OD).
-  const odBearer = await resolveXAIBearer(mediaConfigDir(projectRoot)).catch(
-    () => null,
-  );
-  if (odBearer) {
-    return {
-      apiKey: odBearer.accessToken,
-      source: `oauth-xai-${odBearer.source}`,
-    };
-  }
-
   if (isSandboxModeEnabled(process.env)) return null;
 
-  // 2. Borrow the xAI OAuth token Hermes wrote to ~/.hermes/auth.json
-  //    when the user ran `hermes auth add xai-oauth`. A user who has already authorized
-  //    Hermes doesn't have to run a second OAuth dance inside OD.
-  //    (No proactive refresh here — Hermes itself maintains the token,
-  //    and we only borrow what is currently fresh.)
+  // Borrow the xAI OAuth token Hermes wrote to ~/.hermes/auth.json when the
+  // user ran `hermes auth add xai-oauth`. (No proactive refresh here — Hermes
+  // itself maintains the token, and we only borrow what is currently fresh.)
+  // The OD-native xAI OAuth sign-in was removed with the Databricks auth wave.
   const home = os.homedir();
   const hermesAuth = await readJsonIfPresent(
     path.join(home, '.hermes', 'auth.json'),

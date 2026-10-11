@@ -191,7 +191,6 @@ export interface ServerContext {
   projectStore: any;
   authorizeProjectRequest: AuthorizeProjectRequest;
   authorizeProjectToolRequest: AuthorizeProjectToolRequest;
-  isApiTokenAuthorization: (authorization: string | undefined) => boolean;
   projectFiles: any;
   conversations: any;
   templates: any;
@@ -210,7 +209,6 @@ export interface ServerContext {
   nativeDialogs: any;
   research: any;
   mcp: {
-    pendingAuth: any;
     daemonUrlRef: { current: string };
     inheritedEnvironment: (baseEnv?: NodeJS.ProcessEnv) => Record<string, string>;
   };

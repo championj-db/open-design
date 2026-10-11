@@ -21,15 +21,11 @@ import {
 } from '../analytics/events';
 import type { TrackingExternalMcpElement } from '@open-design/contracts/analytics';
 import {
-  disconnectMcpOAuth,
-  fetchMcpOAuthStatus,
   fetchMcpServers,
   saveMcpServers,
-  startMcpOAuth,
   suggestMcpServerId,
 } from '../state/mcp';
 import type {
-  McpOAuthStatusResponse,
   McpServerConfig,
   McpTemplate,
 } from '../state/mcp';
@@ -770,7 +766,6 @@ interface RowProps {
 function McpRow({ row, idx, total, template, onChange, onRemove, onMoveUp, onMoveDown }: RowProps) {
   const t = useT();
   const isHttpLike = row.transport === 'http' || row.transport === 'sse';
-  const usesManagedOAuth = isHttpLike && effectiveMcpAuthMode(row) === 'oauth';
   const [expanded, setExpanded] = useState<boolean>(false);
   const summaryTitle = row.label?.trim() || row.id || t('mcp.unnamedServer');
   const [showMcpExample, setShowMcpExample] = useState<boolean>(false);
@@ -888,27 +883,12 @@ function McpRow({ row, idx, total, template, onChange, onRemove, onMoveUp, onMov
             </details>
           ) : null}
 
-          {isHttpLike && !row._isNew && row.id ? (
-            usesManagedOAuth ? (
-              <McpOAuthControl serverId={row.id} />
-            ) : (
-              <div className="mcp-oauth-hint hint">
-                <strong>{t('mcp.noManagedOAuth')}</strong>{' '}
-                {t('mcp.noManagedOAuthUseAsConfigured')}
-              </div>
-            )
-          ) : null}
-          {isHttpLike && row._isNew && usesManagedOAuth ? (
-            <div className="mcp-oauth-hint hint">
-              {t('mcp.saveFirstThenClick')}{' '}
-              <strong>{t('mcp.connect')}</strong>{' '}
-              {t('mcp.toGrantOAuthAccess')}
-            </div>
-          ) : null}
-          {isHttpLike && row._isNew && !usesManagedOAuth ? (
+          {/* MCP OAuth sign-in was removed with the Databricks auth wave; HTTP /
+              SSE servers use whatever credentials their config carries. */}
+          {isHttpLike && (row._isNew || row.id) ? (
             <div className="mcp-oauth-hint hint">
               <strong>{t('mcp.noManagedOAuth')}</strong>{' '}
-              {t('mcp.noManagedOAuthSaveDirect')}
+              {row._isNew ? t('mcp.noManagedOAuthSaveDirect') : t('mcp.noManagedOAuthUseAsConfigured')}
             </div>
           ) : null}
 
@@ -1116,291 +1096,6 @@ function McpRow({ row, idx, total, template, onChange, onRemove, onMoveUp, onMov
           </div>
         </>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * "Connect" / "Disconnect" panel for an HTTP/SSE MCP server.
- *
- * The OAuth flow is fully owned by the daemon — this component just kicks
- * it off (POST /api/mcp/oauth/start), opens the returned authorize URL in
- * a new tab, listens for the postMessage from the callback page, and
- * refreshes the local status badge. There's also a fallback poll every
- * 2 seconds while a connect is pending in case the callback page can't
- * reach back via postMessage (cross-origin tab opener edge cases).
- */
-function McpOAuthControl({ serverId }: { serverId: string }) {
-  const t = useT();
-  const [status, setStatus] = useState<McpOAuthStatusResponse | null>(null);
-  const [busy, setBusy] = useState<'idle' | 'starting' | 'awaiting' | 'disconnecting' | 'refreshing'>('idle');
-  const [error, setError] = useState<string | null>(null);
-  // Holds the authorize URL while we are waiting on the user to complete
-  // OAuth in their browser. Surfaced as a fallback `<a>` so the user can
-  // re-open the tab if they accidentally closed it (or if the system
-  // browser ate the popup-open call without giving us feedback).
-  const [pendingAuthUrl, setPendingAuthUrl] = useState<string | null>(null);
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const refresh = async () => {
-    const data = await fetchMcpOAuthStatus(serverId);
-    if (data) setStatus(data);
-    return data;
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, [serverId]);
-
-  // Listen for the postMessage that the callback HTML page emits when the
-  // OAuth flow completes. We accept messages from any origin because the
-  // callback page is served by THIS daemon, but we still validate the
-  // payload shape before reacting to it.
-  useEffect(() => {
-    function onMessage(ev: MessageEvent) {
-      const data = ev.data;
-      if (!data || typeof data !== 'object') return;
-      if (data.type !== 'mcp-oauth') return;
-      if (data.serverId && data.serverId !== serverId) return;
-      if (data.ok) {
-        setError(null);
-        setPendingAuthUrl(null);
-        void refresh();
-      } else if (typeof data.message === 'string') {
-        setError(data.message);
-      }
-      setBusy('idle');
-      stopPoll();
-    }
-    window.addEventListener('message', onMessage);
-    let bc: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== 'undefined') {
-      bc = new BroadcastChannel('open-design-mcp-oauth');
-      bc.onmessage = (ev) => onMessage(ev as MessageEvent);
-    }
-    return () => {
-      window.removeEventListener('message', onMessage);
-      if (bc) bc.close();
-      stopPoll();
-    };
-  }, [serverId]);
-
-  function stopPoll() {
-    if (pollTimer.current) {
-      clearInterval(pollTimer.current);
-      pollTimer.current = null;
-    }
-  }
-
-  function startPoll() {
-    stopPoll();
-    let elapsed = 0;
-    pollTimer.current = setInterval(() => {
-      elapsed += 2000;
-      void (async () => {
-        const data = await refresh();
-        // Auto-stop when the daemon reports connected — handles the
-        // Electron / system-browser case where postMessage can never
-        // reach back across processes, so polling IS the delivery
-        // channel for "auth completed" events.
-        if (data?.connected) {
-          setBusy('idle');
-          setError(null);
-          setPendingAuthUrl(null);
-          stopPoll();
-        }
-      })();
-      // Top out at 5 minutes — same as the daemon-side state cache TTL.
-      if (elapsed >= 5 * 60 * 1000) stopPoll();
-    }, 2000);
-  }
-
-  const onConnect = async () => {
-    setError(null);
-    setPendingAuthUrl(null);
-    setBusy('starting');
-    const result = await startMcpOAuth(serverId);
-    if (!result.ok) {
-      setBusy('idle');
-      setError(result.message);
-      return;
-    }
-    setBusy('awaiting');
-    setPendingAuthUrl(result.response.authorizeUrl);
-    startPoll();
-    // Best-effort: try to open the tab automatically. We deliberately do
-    // NOT treat a null return value as failure — Electron's
-    // setWindowOpenHandler always returns deny (so window.open returns
-    // null) but actually invokes shell.openExternal under the hood, so
-    // the URL DID open in the system browser. The fallback link below
-    // covers the rare case where neither path actually opens a tab.
-    try {
-      window.open(
-        result.response.authorizeUrl,
-        '_blank',
-        'noopener=no,noreferrer=no',
-      );
-    } catch {
-      // ignore — fallback anchor is always rendered while pending
-    }
-  };
-
-  // Manual fallback for the user to push when they've completed auth in
-  // another tab/window but the postMessage handshake didn't fire (closed
-  // opener tab, cross-origin Electron BrowserWindow, etc.).
-  const onRefreshStatus = async () => {
-    setBusy('refreshing');
-    const data = await refresh();
-    setBusy('idle');
-    if (data?.connected) {
-      setError(null);
-      setPendingAuthUrl(null);
-      stopPoll();
-    } else if (busy === 'awaiting' || pendingAuthUrl) {
-      // Still pending — keep the awaiting indicator visible so the user
-      // knows we're still listening for the callback.
-      setBusy('awaiting');
-    }
-  };
-
-  const onCancelPending = () => {
-    setPendingAuthUrl(null);
-    setBusy('idle');
-    setError(null);
-    stopPoll();
-  };
-
-  const onDisconnect = async () => {
-    setBusy('disconnecting');
-    const ok = await disconnectMcpOAuth(serverId);
-    setBusy('idle');
-    if (ok) {
-      setError(null);
-      setPendingAuthUrl(null);
-      setStatus({ connected: false });
-    } else {
-      setError(t('mcp.disconnectFailed'));
-    }
-  };
-
-  const connected = Boolean(status?.connected);
-  const expiresLabel =
-    status?.expiresAt && status.expiresAt > 0
-      ? new Date(status.expiresAt).toLocaleString()
-      : null;
-  const isAwaiting = busy === 'awaiting' || (Boolean(pendingAuthUrl) && !connected);
-
-  return (
-    <div className={`mcp-oauth-control${connected ? ' connected' : ''}`}>
-      <div className="mcp-oauth-status" aria-live="polite">
-        {connected ? (
-          <>
-            <span className="mcp-oauth-dot mcp-oauth-dot-ok" aria-hidden />
-            <span>
-              <strong>{t('mcp.connected')}</strong>{' '}
-              {expiresLabel ? (
-                <span className="hint">{t('mcp.tokenExpires', { time: expiresLabel })}</span>
-              ) : (
-                <span className="hint">{t('mcp.nonExpiringToken')}</span>
-              )}
-            </span>
-          </>
-        ) : isAwaiting ? (
-          <>
-            <span className="mcp-oauth-dot mcp-oauth-dot-pending" aria-hidden />
-            <span>
-              <strong>{t('mcp.waitingForAuthorization')}</strong>{' '}
-              <span className="hint">
-                {t('mcp.approveInBrowserHint')}
-              </span>
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="mcp-oauth-dot" aria-hidden />
-            <span>
-              <strong>{t('mcp.notConnected')}</strong>{' '}
-              <span className="hint">
-                {t('mcp.clickConnectHint')}
-              </span>
-            </span>
-          </>
-        )}
-      </div>
-
-      <div className="mcp-oauth-actions">
-        {connected ? (
-          <>
-            <button
-              type="button"
-              className="primary"
-              onClick={onConnect}
-              disabled={busy !== 'idle' && busy !== 'refreshing'}
-              title={t('mcp.reauthenticateTitle')}
-            >
-              {busy === 'starting' || busy === 'awaiting' ? t('mcp.connecting') : t('mcp.reconnect')}
-            </button>
-            <button
-              type="button"
-              onClick={onRefreshStatus}
-              disabled={busy !== 'idle' && busy !== 'refreshing'}
-              title={t('mcp.recheckTokenTitle')}
-            >
-              {busy === 'refreshing' ? t('mcp.checking') : t('mcp.refresh')}
-            </button>
-            <button
-              type="button"
-              onClick={onDisconnect}
-              disabled={busy !== 'idle' && busy !== 'refreshing'}
-            >
-              {busy === 'disconnecting' ? t('mcp.disconnecting') : t('mcp.disconnect')}
-            </button>
-          </>
-        ) : isAwaiting ? (
-          <>
-            <button
-              type="button"
-              className="primary"
-              onClick={onRefreshStatus}
-              disabled={busy === 'refreshing'}
-              title={t('mcp.completedAuthTitle')}
-            >
-              {busy === 'refreshing' ? t('mcp.checking') : t('mcp.approvedRefresh')}
-            </button>
-            <button type="button" onClick={onCancelPending}>
-              {t('common.cancel')}
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="primary"
-            onClick={onConnect}
-            disabled={busy !== 'idle'}
-          >
-            {busy === 'starting' ? t('mcp.starting') : t('mcp.connect')}
-          </button>
-        )}
-      </div>
-
-      {pendingAuthUrl && !connected ? (
-        <div className="mcp-oauth-fallback">
-          <span className="hint">
-            {t('mcp.browserDidntOpen')}{' '}
-            <a
-              href={pendingAuthUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="md-link"
-            >
-              {t('mcp.openAuthorizationPage')}
-            </a>
-            .
-          </span>
-        </div>
-      ) : null}
-
-      {error ? <div className="mcp-oauth-error">{error}</div> : null}
     </div>
   );
 }

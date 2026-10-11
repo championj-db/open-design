@@ -705,19 +705,6 @@ import {
   resolveExternalMcpServersForRun,
 } from './run-tool-bundle.js';
 import {
-  beginAuth,
-  exchangeCodeForToken,
-  PendingAuthCache,
-  refreshAccessToken,
-} from './mcp-oauth.js';
-import {
-  clearToken,
-  getToken,
-  isTokenExpired,
-  readAllTokens,
-  setToken,
-} from './mcp-tokens.js';
-import {
   agentCliEnvForAgent,
   readAppConfig,
   readAppConfigSync,
@@ -908,7 +895,6 @@ import { registerPluginAssetRoutes } from './routes/plugins/assets.js';
 import { registerPluginMarketplaceRoutes } from './routes/plugins/marketplaces.js';
 import { registerPluginEventRoutes, registerPluginRoutes, registerProjectPluginRoutes } from './routes/plugins/index.js';
 import { registerMcpRoutes } from './mcp-routes.js';
-import { registerXaiRoutes } from './routes/xai.js';
 import { registerLiveArtifactRoutes } from './routes/live-artifact.js';
 import { registerDeliverableSyntaxToolRoutes } from './routes/deliverable-syntax-tool.js';
 import { registerDesignSystemToolRoutes } from './routes/design-system-tool.js';
@@ -1159,8 +1145,8 @@ import { configureComposioConfigStore } from './connectors/composio-config.js';
 import {
   CHAT_TOOL_ENDPOINTS,
   CHAT_TOOL_OPERATIONS,
-  PROJECT_EXPORT_TOOL_ENDPOINT,
   resolveChatToolTokenTtlMs,
+  toolGrantCoversRequest,
   toolTokenRegistry,
 } from './tool-tokens.js';
 import {
@@ -1189,6 +1175,7 @@ import {
 import {
   allowedBrowserPorts,
   configuredAllowedOrigins,
+  isDatabricksAppSameOrigin,
   isAllowedBrowserOrigin,
   isLocalSameOrigin,
   isZeroConfigClipperLibraryRequest,
@@ -1201,12 +1188,11 @@ import {
 } from './library-tokens.js';
 import { listLibraryTokenOrigins } from './library-store.js';
 import {
-  API_TOKEN_BASIC_CHALLENGE,
-  apiTokenAuthorizationMatches,
-  apiTokenFromEnv,
-  isApiAuthDisabled,
-  isApiTokenMiddlewareEnabled,
-} from './api-token-auth.js';
+  createDatabricksAuthMiddleware,
+  createDatabricksIdentityResolver,
+  databricksHostOrigin,
+  localDevUserFromEnv,
+} from './auth/databricks-obo.js';
 import { createOpenDesignPublicMetadataService } from './services/open-design-public-metadata.js';
 import { createWhatsNewService } from './services/whats-new.js';
 import { execCommandViaLoginShell } from './services/login-shell.js';
@@ -1229,12 +1215,7 @@ import {
   renderPluginSharePrompt,
 } from './plugins/share-helpers.js';
 import { sanitizeArchiveFilename } from './projects/archive-filename.js';
-import {
-  isLoopbackHostname,
-  isLoopbackPeerAddress,
-  requireLocalDaemonRequest,
-} from './http/local-daemon-request.js';
-import { renderOAuthResultPage } from './http/oauth-result-page.js';
+import { requireLocalDaemonRequest } from './http/local-daemon-request.js';
 import { bearerTokenFromRequest, createToolRequestAuth } from './http/tool-request-auth.js';
 
 /**
@@ -1463,12 +1444,6 @@ const designSystemGenerationJobs = createDesignSystemGenerationJobStore({
 });
 let routineService = null;
 
-// In-memory OAuth state cache. Lives for the daemon process's lifetime.
-// Maps the OAuth `state` parameter we generated in /api/mcp/oauth/start
-// to the verifier + endpoint info needed to finish the exchange when the
-// browser hits /api/mcp/oauth/callback.
-const mcpPendingAuth = new PendingAuthCache();
-
 /**
  * Resolve the daemon's public base URL — the origin the user's browser
  * (or the OAuth provider) reaches us at. Order of precedence:
@@ -1479,10 +1454,6 @@ const mcpPendingAuth = new PendingAuthCache();
  *      local dev and most reverse-proxy setups (Express respects
  *      `trust proxy` so X-Forwarded-* headers are honored).
  *
- * The OAuth callback URI is derived from this — it MUST be reachable from
- * the user's browser, otherwise the redirect after auth lands on
- * ERR_CONNECTION_REFUSED. Misconfiguration is loud: the OAuth provider
- * will reject `redirect_uri` mismatches.
  */
 function getPublicBaseUrl(req) {
   const env = process.env.OD_PUBLIC_BASE_URL;
@@ -1493,52 +1464,6 @@ function getPublicBaseUrl(req) {
   const host = req.get('host');
   if (!host) return `http://localhost:${process.env.OD_PORT ?? '7456'}`;
   return `${proto}://${host}`;
-}
-
-function mcpOAuthCallbackUrl(req) {
-  return `${getPublicBaseUrl(req)}/api/mcp/oauth/callback`;
-}
-
-/**
- * Refresh an expired token using the OAuth client context that the original
- * authorization-code exchange persisted alongside the token. Refresh tokens
- * are bound (RFC 6749 §6) to the client that received them, so we MUST
- * refresh against the same `tokenEndpoint` / `clientId` / `clientSecret`
- * pair — re-running discovery with a different redirect URI would risk
- * registering a new client_id that the upstream then rejects the refresh
- * for. Tokens persisted before that context was recorded can't be safely
- * refreshed; the caller treats `null` as "needs reconnect".
- */
-async function refreshAndPersistToken(dataDir, serverId, current) {
-  if (!current.refreshToken) return null;
-  if (!current.tokenEndpoint || !current.clientId) return null;
-  const tokenResp = await refreshAccessToken({
-    tokenEndpoint: current.tokenEndpoint,
-    clientId: current.clientId,
-    clientSecret: current.clientSecret,
-    refreshToken: current.refreshToken,
-    scope: current.scope,
-    resource: current.resourceUrl,
-  });
-  const next = {
-    accessToken: tokenResp.access_token,
-    refreshToken: tokenResp.refresh_token ?? current.refreshToken,
-    tokenType: tokenResp.token_type ?? 'Bearer',
-    scope: tokenResp.scope ?? current.scope,
-    expiresAt:
-      typeof tokenResp.expires_in === 'number'
-        ? Date.now() + tokenResp.expires_in * 1000
-        : undefined,
-    savedAt: Date.now(),
-    tokenEndpoint: current.tokenEndpoint,
-    clientId: current.clientId,
-    clientSecret: current.clientSecret,
-    authServerIssuer: current.authServerIssuer,
-    redirectUri: current.redirectUri,
-    resourceUrl: current.resourceUrl,
-  };
-  await setToken(dataDir, serverId, next);
-  return next;
 }
 
 const activeChatAgentEventSinks = new Map();
@@ -1823,12 +1748,6 @@ export function createAgentRuntimeEnv(
     SANDBOX_RUNTIME,
   );
   Object.assign(env, inheritedEnvironment(baseEnv));
-  // The daemon API token authorizes the whole non-loopback API surface. Agent
-  // children receive only their run-scoped tool capability, never that broad
-  // credential inherited from the daemon process (including Windows casing).
-  for (const key of Object.keys(env)) {
-    if (key.toUpperCase() === 'OD_API_TOKEN') delete env[key];
-  }
   // A GUI-launched daemon can inherit a broken PATHEXT such as `.CPL` (issue
   // #6934). Nested native commands then lose stdout/stderr or fail with
   // ERROR_NO_DATA. On Windows, recover a usable executable-extension list while
@@ -2557,9 +2476,6 @@ export function shouldReportRunCompletionTelemetryFallbackStatus(status: unknown
 
 const PROJECT_PREVIEW_SCOPE_TTL_MS = 60 * 60 * 1000;
 const PROJECT_PREVIEW_ASSET_PATH_RE = /^\/projects\/([^/]+)\/preview\/([^/]+)\/.+$/u;
-const PROJECT_RUN_SCOPED_EXPORT_PATH_RE =
-  /^\/projects\/[^/]+\/export(?:\/(?:pptx|pdf-image|image))?$/u;
-
 function createProjectPreviewScopeRegistry() {
   const scopes = new Map();
 
@@ -3149,29 +3065,17 @@ export async function startServer({
     process.env.OD_WORKSPACE_AUTHORITY_CACHE_MODE,
   );
 
-  // Plan §3.K1 / spec §15.7 — bound-API-token guard.
-  //
-  // The daemon refuses to bind to a public interface unless an
-  // OD_API_TOKEN is set. This is the spec §16 Phase 5 safety floor:
-  // a hosted operator can no longer accidentally publish an unsecured
-  // daemon by setting OD_BIND_HOST=0.0.0.0 without a token.
-  //
-  // Loopback hosts (127.0.0.1 / ::1 / localhost) are always allowed —
-  // the desktop / dev flow remains unchanged. Setting OD_API_TOKEN is
-  // purely additive: when present, every /api/* request must carry a
-  // matching Bearer token or browser Basic credentials (loopback origins
-  // are exempted so the desktop UI keeps working).
-  const apiToken = apiTokenFromEnv();
-  const apiAuthDisabled = isApiAuthDisabled();
-  const apiTokenAuthEnabled = apiToken.length > 0 && !apiAuthDisabled;
-  const isApiTokenAuthorization = (authorization: string | undefined): boolean =>
-    apiTokenAuthEnabled && apiTokenAuthorizationMatches(authorization, apiToken);
-  if (!isLoopbackHostname(host) && apiToken.length === 0 && !apiAuthDisabled) {
-    throw new Error(
-      `OD_BIND_HOST=${host} requires OD_API_TOKEN to be set. ` +
-      `Generate one with \`openssl rand -hex 32\` and re-launch. ` +
-      `(Loopback hosts 127.0.0.1 / ::1 / localhost do not need a token.) ` +
-      `Set OD_DISABLE_API_AUTH=1 only when a trusted reverse proxy already authenticates every request.`,
+  // Databricks OBO auth (docs/databricks-native/INTEGRATION_REFERENCE.md §2).
+  // Every /api/* request must carry the Apps proxy's X-Forwarded-Access-Token,
+  // resolved to a user through SCIM Me. OD_LOCAL_DEV_USER is the explicit
+  // local-development stand-in; localDevUserFromEnv() refuses to start with it
+  // inside a deployed Databricks App.
+  const localDevUser = localDevUserFromEnv();
+  const identityResolver = createDatabricksIdentityResolver({ hostOrigin: databricksHostOrigin() });
+  if (localDevUser) {
+    console.warn(
+      `[auth] OD_LOCAL_DEV_USER is set: requests without X-Forwarded-Access-Token run as ${localDevUser.userName}. ` +
+        'Local development only.',
     );
   }
 
@@ -3221,81 +3125,44 @@ export async function startServer({
   app.use(express.json({ limit: '4mb' }));
   const projectPreviewScopes = createProjectPreviewScopeRegistry();
 
-  // Plan §3.K1 — API-token middleware.
-  //
-  // Active only when OD_API_TOKEN is set and API auth is not disabled.
-  // Loopback origins skip the check (the desktop UI / local CLI never carry
-  // credentials); every other request must present a matching bearer token
-  // (CLI / proxy) or matching HTTP Basic credentials (browser UI). A currently
-  // valid run-scoped token may pass only an exact screenshot-export endpoint;
-  // its route rechecks the operation and project. Health / readiness / version
-  // remain open. Server-minted project preview asset scopes are also accepted
-  // for GETs so sandboxed
-  // browser iframes can load HTML/CSS/JS without privileged headers.
-  // Rich daemon status stays authenticated because it includes local
-  // runtime paths.
-  if (apiTokenAuthEnabled) {
-    const openProbePaths = new Set([
-      '/health',
-      '/api/health',
-      '/ready',
-      '/api/ready',
-      '/version',
-      '/api/version',
-    ]);
-    app.use('/api', (req, res, next) => {
-      if (openProbePaths.has(req.path)) return next();
-      if (req.method === 'GET') {
-        const previewAsset = parseProjectPreviewAssetPath(req.path);
-        if (
-          previewAsset &&
-          projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope)
-        ) {
-          return next();
+  // OBO gate for /api/*. Admitted without a user (their routes authorize
+  // themselves): health / readiness / version probes, GETs of server-minted
+  // project preview asset scopes (sandboxed iframes cannot send headers), and
+  // requests carrying a live run-scoped tool token for that exact tool route
+  // (the daemon's own agent children calling back; the route rechecks the
+  // operation and project).
+  // Rich daemon status stays authenticated because it includes local runtime
+  // paths. Static SPA assets are not gated: the Apps proxy already requires a
+  // signed-in workspace user, and they carry no user data.
+  const openProbePaths = new Set([
+    '/health',
+    '/api/health',
+    '/ready',
+    '/api/ready',
+    '/version',
+    '/api/version',
+  ]);
+  app.use(
+    '/api',
+    createDatabricksAuthMiddleware({
+      resolver: identityResolver,
+      localDevUser,
+      admitWithoutUser: (req) => {
+        if (openProbePaths.has(req.path)) return true;
+        if (req.method === 'GET') {
+          const previewAsset = parseProjectPreviewAssetPath(req.path);
+          if (
+            previewAsset &&
+            projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope)
+          ) {
+            return true;
+          }
         }
-      }
-      // Loopback short-circuit. We ignore the proxied X-Forwarded-For
-      // header here because a reverse proxy MUST always forward the
-      // credentials; the loopback bypass exists for the localhost desktop
-      // UI which has no proxy in the path.
-      if (isLoopbackPeerAddress(req.socket?.remoteAddress)) return next();
-      if (apiTokenAuthorizationMatches(req.get('authorization'), apiToken)) return next();
-      if (
-        req.method === 'POST'
-        && PROJECT_RUN_SCOPED_EXPORT_PATH_RE.test(req.path)
-        && toolTokenRegistry.validate(bearerTokenFromRequest(req), {
-          endpoint: PROJECT_EXPORT_TOOL_ENDPOINT,
-          operation: 'project:export',
-        }).ok
-      ) {
-        return next();
-      }
-      res.setHeader('WWW-Authenticate', API_TOKEN_BASIC_CHALLENGE);
-      return res.status(401).json({
-        error: {
-          code: 'API_TOKEN_REQUIRED',
-          message: 'Authorization: Bearer <OD_API_TOKEN> or browser Basic authentication required',
-        },
-      });
-    });
-
-    // Docker Desktop forwards host-browser traffic across its bridge, so the
-    // daemon correctly sees a non-loopback peer. Challenge the SPA document
-    // navigation before serving any shell bytes; browsers then cache the Basic
-    // credentials for same-origin /api requests. Static assets do not need a
-    // separate challenge because the authenticated shell is the only entry
-    // point and API routes still enforce credentials independently.
-    app.use((req, res, next) => {
-      if (isLoopbackPeerAddress(req.socket?.remoteAddress)) return next();
-      if (resolveStaticSpaFallbackPath(req, staticDir) === null) return next();
-      if (apiTokenAuthorizationMatches(req.get('authorization'), apiToken)) return next();
-
-      res.setHeader('WWW-Authenticate', API_TOKEN_BASIC_CHALLENGE);
-      return res.status(401).type('text/plain').send(
-        'OpenDesign authentication required. Use username "open-design" and OD_API_TOKEN as the password.',
-      );
-    });
-  }
+        const validation = toolTokenRegistry.validate(bearerTokenFromRequest(req));
+        return validation.ok && toolGrantCoversRequest(validation.grant, req.method, `/api${req.path}`);
+      },
+    }),
+  );
 
   const designSystemServices = createDesignSystemServerServices({
     // `db` (below) is not initialized yet at this point in `startServer` —
@@ -3473,7 +3340,10 @@ export async function startServer({
     // Paired browser-extension origins are persisted in library_tokens and
     // seeded into this in-memory allowlist at boot / on pairing.
     const allowedOrigins = [...extraAllowedOrigins, ...libraryExtensionAllowedOrigins()];
-    if (!isAllowedBrowserOrigin(origin, req.headers.host, ports, host, allowedOrigins)) {
+    if (
+      !isAllowedBrowserOrigin(origin, req.headers.host, ports, host, allowedOrigins)
+      && !isDatabricksAppSameOrigin(origin, req.headers.host, req.headers['x-forwarded-host'])
+    ) {
       if (req.method !== 'GET' || !isPortlessLoopbackOrigin(String(origin))) {
         return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
       }
@@ -8619,11 +8489,7 @@ export async function startServer({
   registerMcpRoutes(app, {
     http: httpDeps,
     paths: pathDeps,
-    mcp: { pendingAuth: mcpPendingAuth, daemonUrlRef, inheritedEnvironment },
-  });
-  registerXaiRoutes(app, {
-    http: httpDeps,
-    paths: pathDeps,
+    mcp: { daemonUrlRef, inheritedEnvironment },
   });
   // Project workspace
   registerActiveContextRoutes(app, {
@@ -9243,7 +9109,6 @@ export async function startServer({
     auth: authDeps,
     authorizeProjectRequest,
     authorizeProjectToolRequest,
-    isApiTokenAuthorization,
     projectPreviewScopes,
   });
   registerProjectFileRoutes(app, {
@@ -11370,51 +11235,10 @@ export async function startServer({
       runScopedServers: runScopedMcpServers,
       sandboxMode: SANDBOX_RUNTIME.enabled,
     });
+    // MCP OAuth sign-in was removed with the Databricks auth wave, so no
+    // per-server Bearer tokens are injected at spawn.
     const oauthTokensForSpawn = {};
-    if (persistedTokenServerIds.size > 0) {
-      try {
-        const stored = await readAllTokens(RUNTIME_DATA_DIR);
-        for (const [serverId, tok] of Object.entries(stored)) {
-          if (!persistedTokenServerIds.has(serverId)) continue;
-          // Default to the persisted access token; null it out if expired so
-          // we never inject a stale `Authorization: Bearer …` header. The
-          // model treats a server with a Bearer pinned as connected and
-          // discourages re-auth, which is the worst possible UX when the
-          // token is going to 401 every call.
-          let access = isTokenExpired(tok) ? null : tok.accessToken;
-          if (isTokenExpired(tok) && tok.refreshToken) {
-            try {
-              const refreshed = await refreshAndPersistToken(
-                RUNTIME_DATA_DIR,
-                serverId,
-                tok,
-              );
-              if (refreshed) access = refreshed.accessToken;
-            } catch (err) {
-              console.warn(
-                '[mcp-oauth] refresh failed for',
-                serverId,
-                err && err.message ? err.message : err,
-              );
-            }
-          }
-          if (access) {
-            oauthTokensForSpawn[serverId] = access;
-          } else {
-            console.warn(
-              '[mcp-oauth] skipping expired token for',
-              serverId,
-              '— reconnect required',
-            );
-          }
-        }
-      } catch (err) {
-        console.warn(
-          '[mcp-tokens] read failed:',
-          err && err.message ? err.message : err,
-        );
-      }
-    }
+    void persistedTokenServerIds;
     const connectedExternalMcp = enabledExternalMcp
       .filter((s) => typeof oauthTokensForSpawn[s.id] === 'string')
       .map((s) => ({ id: s.id, label: s.label }));
@@ -17963,7 +17787,6 @@ export async function startServer({
     projectStore: projectStoreDeps,
     authorizeProjectRequest,
     authorizeProjectToolRequest,
-    isApiTokenAuthorization,
     projectFiles: projectFileDeps,
     conversations: conversationDeps,
     templates: templateDeps,
@@ -17981,7 +17804,7 @@ export async function startServer({
     orbit: orbitDeps,
     nativeDialogs: nativeDialogDeps,
     research: researchDeps,
-    mcp: { pendingAuth: mcpPendingAuth, daemonUrlRef },
+    mcp: { daemonUrlRef },
     plugins: {
       connectorService,
       detectSkillPluginCandidateOnRunSuccess,

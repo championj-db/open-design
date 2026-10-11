@@ -535,82 +535,12 @@
 .mcp-foot-spacer { flex: 1; }
 .mcp-saved-msg { color: var(--success, #6c6); }
 
-/* Per-row OAuth Connect/Disconnect control. Sits between the row header
- * and the field grid so the connection state is the FIRST thing the user
- * sees on a row that needs auth. */
-.mcp-oauth-control {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-}
-.mcp-oauth-control.connected {
-  border-color: color-mix(in srgb, var(--success, #2da44e) 60%, var(--border));
-  background: color-mix(in srgb, var(--success, #2da44e) 8%, var(--bg-subtle));
-}
-.mcp-oauth-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-.mcp-oauth-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--text-faint);
-}
-.mcp-oauth-dot-ok {
-  background: var(--success, #2da44e);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success, #2da44e) 25%, transparent);
-}
-.mcp-oauth-dot-pending {
-  background: var(--accent);
-  animation: mcp-oauth-pulse 1.2s ease-in-out infinite;
-}
-@keyframes mcp-oauth-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.mcp-oauth-actions {
-  display: inline-flex;
-  gap: 6px;
-}
-.mcp-oauth-actions button {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-.mcp-oauth-error {
-  font-size: 12px;
-  padding: 6px 8px;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--danger, #d54) 14%, transparent);
-  color: var(--danger, #d54);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
+/* Per-row note for HTTP/SSE servers (no managed OAuth). */
 .mcp-oauth-hint {
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   font-size: 12px;
-}
-.mcp-oauth-fallback {
-  font-size: 12px;
-  line-height: 1.5;
-}
-.mcp-oauth-fallback .md-link {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.mcp-oauth-fallback .md-link:hover {
-  text-decoration-thickness: 2px;
 }
 
 /* Unified trust badge for plugin registry surfaces. Installed
@@ -668,51 +598,6 @@
 
   -webkit-backdrop-filter: var(--material-thin-backdrop);
   backdrop-filter: var(--material-thin-backdrop);
-}
-
-/* xAI OAuth paste-back: shown while a Sign in flow is in flight, in case
-   xAI returns a code instead of redirecting to the loopback listener. */
-.xai-oauth-paste {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
-}
-.xai-oauth-paste .hint {
-  font-size: 12px;
-}
-.xai-oauth-paste-row {
-  display: flex;
-  gap: 6px;
-  align-items: stretch;
-}
-.xai-oauth-paste-row input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Heads-up banner shown while a Sign-in flow is awaiting callback. xAI
-   sometimes renders a "Cannot connect" page that misleads the user into
-   thinking auth failed; this banner tells them to ignore that page and
-   stay on the OD panel. */
-.xai-oauth-warning {
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 10px 12px;
-  border: 1px solid var(--accent);
-  border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  color: var(--text);
-  margin-top: 6px;
-}
-.xai-oauth-warning strong {
-  color: var(--accent);
-}
-.xai-oauth-warning em {
-  font-style: normal;
-  font-weight: 600;
-  color: var(--text-muted);
 }
 
 /* PluginLoopHome — the minimum-closed-loop Home entry: a single prompt

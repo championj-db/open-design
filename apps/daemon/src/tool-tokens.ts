@@ -122,6 +122,38 @@ function asPublicGrant(stored: StoredToolTokenGrant): ToolTokenGrant {
   return grant;
 }
 
+// The concrete request paths one endpoint capability key covers. `:param`
+// segments match one path segment. The export key covers exactly the
+// run-scoped raster export routes (POST `/export`, `/export/image`,
+// `/export/pdf-image`, `/export/pptx`), not vector PDF or other methods.
+const PROJECT_RUN_SCOPED_EXPORT_PATH_RE =
+  /^\/api\/projects\/[^/]+\/export(?:\/(?:pptx|pdf-image|image))?$/u;
+
+function toolEndpointPattern(endpoint: ToolEndpoint): RegExp {
+  if (endpoint === PROJECT_EXPORT_TOOL_ENDPOINT) return PROJECT_RUN_SCOPED_EXPORT_PATH_RE;
+  const source = endpoint
+    .split('/')
+    .map((segment) => (segment.startsWith(':') ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('/');
+  return new RegExp(`^${source}$`, 'u');
+}
+
+/**
+ * Whether `grant` names the route at `requestPath` (a full `/api/...` path)
+ * among its endpoints. The /api auth gate admits a run-scoped token only
+ * here; the route itself still checks the operation and project.
+ */
+export function toolGrantCoversRequest(
+  grant: ToolTokenGrant,
+  method: string,
+  requestPath: string,
+): boolean {
+  return grant.allowedEndpoints.some((endpoint) => {
+    if (endpoint === PROJECT_EXPORT_TOOL_ENDPOINT && method.toUpperCase() !== 'POST') return false;
+    return toolEndpointPattern(endpoint).test(requestPath);
+  });
+}
+
 // Plan §3.A3 / spec §9: pure connector capability gate over a token grant.
 // When the grant carries no plugin snapshot id, the call is from a
 // non-plugin run and we let it through (back-compat). When the grant
