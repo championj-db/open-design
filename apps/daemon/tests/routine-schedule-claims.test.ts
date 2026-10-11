@@ -4,7 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import Database from 'better-sqlite3';
+import { createAbortTrigger, dropRowTrigger, openDataDirDatabase } from './helpers/test-db.js';
+
 import type { InstalledPluginRecord, PluginManifest } from '@open-design/contracts';
 
 import {
@@ -24,11 +25,9 @@ import { upsertInstalledPlugin } from '../src/plugins/registry.js';
 import { createSnapshot, getSnapshot, linkSnapshotToProject } from '../src/plugins/snapshots.js';
 
 let tmp: string;
-let dbFile: string;
 
 beforeEach(async () => {
   tmp = await mkdtemp(path.join(os.tmpdir(), 'od-routine-claims-'));
-  dbFile = path.join(tmp, 'app.sqlite');
 });
 
 afterEach(async () => {
@@ -56,9 +55,8 @@ describe('routine scheduled slot claims', () => {
       updatedAt: 1779012000000,
     });
 
-    const second = new Database(dbFile);
+    const second = openDataDirDatabase(tmp);
     try {
-      second.pragma('foreign_keys = ON');
 
       const firstRun = insertScheduledRoutineRun(first, makeRun('run-1'), 1779012900000);
       const secondRun = insertScheduledRoutineRun(second, makeRun('run-2'), 1779012900000);
@@ -426,16 +424,12 @@ describe('routine scheduled loser cleanup', () => {
       // We fail on the conversations.applied_plugin_snapshot_id update so the
       // project pin has already moved but the resolver throws before
       // returning a snapshot to the caller.
-      db.exec(`
-        DROP TRIGGER IF EXISTS fail_routine_conv_snapshot_link;
-        CREATE TRIGGER fail_routine_conv_snapshot_link
-        BEFORE UPDATE OF applied_plugin_snapshot_id ON conversations
-        WHEN NEW.applied_plugin_snapshot_id IS NOT NULL
-          AND NEW.id LIKE 'routine-conv-%'
-        BEGIN
-          SELECT RAISE(ABORT, 'routine conversation snapshot link failed');
-        END;
-      `);
+      createAbortTrigger(db, {
+        name: 'fail_routine_conv_snapshot_link',
+        event: 'BEFORE UPDATE OF applied_plugin_snapshot_id ON conversations',
+        condition: `NEW.applied_plugin_snapshot_id IS NOT NULL AND NEW.id LIKE 'routine-conv-%'`,
+        message: 'routine conversation snapshot link failed',
+      });
 
       await vi.advanceTimersByTimeAsync(60_000);
       await vi.advanceTimersByTimeAsync(0);
@@ -462,7 +456,7 @@ describe('routine scheduled loser cleanup', () => {
     } finally {
       vi.useRealTimers();
       try {
-        db.exec('DROP TRIGGER IF EXISTS fail_routine_conv_snapshot_link');
+        dropRowTrigger(db, 'fail_routine_conv_snapshot_link', 'conversations');
       } catch {
         // The test may fail before the trigger exists.
       }
@@ -583,16 +577,13 @@ describe('routine prepare failure cleanup', () => {
       expect(createRoutine.status).toBe(201);
       const created = await createRoutine.json() as { routine: { id: string } };
 
-      db.exec(`
-        DROP TRIGGER IF EXISTS fail_scheduled_routine_project_insert;
-        CREATE TRIGGER fail_scheduled_routine_project_insert
-        BEFORE INSERT ON projects
-        WHEN NEW.id LIKE 'routine-%'
-          AND json_extract(NEW.metadata_json, '$.routineId') = '${created.routine.id}'
-        BEGIN
-          SELECT RAISE(ABORT, 'routine project insert failed');
-        END;
-      `);
+      createAbortTrigger(db, {
+        name: 'fail_scheduled_routine_project_insert',
+        event: 'BEFORE INSERT ON projects',
+        condition: `NEW.id LIKE 'routine-%'
+          AND NEW.metadata_json::json ->> 'routineId' = '${created.routine.id}'`,
+        message: 'routine project insert failed',
+      });
 
       await vi.advanceTimersByTimeAsync(60_000);
       await vi.advanceTimersByTimeAsync(0);
@@ -638,7 +629,7 @@ describe('routine prepare failure cleanup', () => {
     } finally {
       vi.useRealTimers();
       try {
-        db.exec('DROP TRIGGER IF EXISTS fail_scheduled_routine_project_insert');
+        dropRowTrigger(db, 'fail_scheduled_routine_project_insert', 'projects');
       } catch {
         // The test may fail before the trigger exists.
       }
@@ -734,15 +725,12 @@ describe('routine prepare failure cleanup', () => {
       expect(createRoutine.status).toBe(201);
       const created = await createRoutine.json() as { routine: { id: string } };
 
-      db.exec(`
-        DROP TRIGGER IF EXISTS fail_manual_routine_message_insert;
-        CREATE TRIGGER fail_manual_routine_message_insert
-        BEFORE INSERT ON messages
-        WHEN NEW.id LIKE 'routine-user-%'
-        BEGIN
-          SELECT RAISE(ABORT, 'routine message insert failed');
-        END;
-      `);
+      createAbortTrigger(db, {
+        name: 'fail_manual_routine_message_insert',
+        event: 'BEFORE INSERT ON messages',
+        condition: `NEW.id LIKE 'routine-user-%'`,
+        message: 'routine message insert failed',
+      });
 
       const runRes = await fetch(`${started.url}/api/routines/${created.routine.id}/run`, {
         method: 'POST',
@@ -795,7 +783,7 @@ describe('routine prepare failure cleanup', () => {
       expect(chatRun?.status).toBe('canceled');
     } finally {
       try {
-        db.exec('DROP TRIGGER IF EXISTS fail_manual_routine_message_insert');
+        dropRowTrigger(db, 'fail_manual_routine_message_insert', 'messages');
       } catch {
         // The test may fail before the trigger exists.
       }
@@ -830,19 +818,16 @@ describe('routine prepare failure cleanup', () => {
       expect(createRoutine.status).toBe(201);
       const created = await createRoutine.json() as { routine: { id: string } };
 
-      db.exec(`
-        DROP TRIGGER IF EXISTS fail_manual_routine_conversation_insert;
-        CREATE TRIGGER fail_manual_routine_conversation_insert
-        BEFORE INSERT ON conversations
-        WHEN NEW.id LIKE 'routine-conv-%'
+      createAbortTrigger(db, {
+        name: 'fail_manual_routine_conversation_insert',
+        event: 'BEFORE INSERT ON conversations',
+        condition: `NEW.id LIKE 'routine-conv-%'
           AND NEW.project_id IN (
             SELECT id FROM projects
-             WHERE json_extract(metadata_json, '$.routineId') = '${created.routine.id}'
-          )
-        BEGIN
-          SELECT RAISE(ABORT, 'routine conversation insert failed');
-        END;
-      `);
+             WHERE metadata_json::json ->> 'routineId' = '${created.routine.id}'
+          )`,
+        message: 'routine conversation insert failed',
+      });
 
       const runRes = await fetch(`${started.url}/api/routines/${created.routine.id}/run`, {
         method: 'POST',
@@ -884,7 +869,7 @@ describe('routine prepare failure cleanup', () => {
         .toEqual({ n: 0 });
     } finally {
       try {
-        db.exec('DROP TRIGGER IF EXISTS fail_manual_routine_conversation_insert');
+        dropRowTrigger(db, 'fail_manual_routine_conversation_insert', 'conversations');
       } catch {
         // The test may fail before the trigger exists.
       }

@@ -232,9 +232,9 @@ describe('backfillDesignSystemWorkspaceResources', () => {
     db.exec(`
       DROP TABLE workspace_projects;
       CREATE TABLE workspace_projects (
-        project_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL,
-        created_by_workspace_member_id TEXT
+        project_id TEXT COLLATE "C" NOT NULL,
+        workspace_id TEXT COLLATE "C" NOT NULL,
+        created_by_workspace_member_id TEXT COLLATE "C"
       );
       INSERT INTO workspace_projects VALUES
         ('project-ambiguous', '${WORKSPACE_A}', 'member-a'),

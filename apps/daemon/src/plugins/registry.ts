@@ -33,10 +33,10 @@ import type {
 } from '@open-design/contracts';
 import { defaultTrustForRecord, resolveCapabilitiesGranted } from './trust.js';
 import { isInternalBundledStrategyV2 } from './strategy-provenance.js';
-import { getWorkspaceResourceByResourceId } from '../db.js';
-import type Database from 'better-sqlite3';
+import { getWorkspaceResourceByResourceId, mapWorkspaceResourcesByResourceId } from '../db.js';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type DbRow = Record<string, unknown>;
 
 export interface RegistryRoots {
@@ -248,16 +248,36 @@ export function rowToInstalledPlugin(row: DbRow): InstalledPluginRecord {
  * catalog: it may see unbound local user plugins and bundled plugins, but not
  * anything claimed by a Workspace.
  */
+/**
+ * Plugin bindings preloaded once for a list call (one query instead of one
+ * per plugin), or the error the lookup raised.
+ */
+type PluginBindingSnapshot =
+  | { bindings: Map<string, NonNullable<ReturnType<typeof getWorkspaceResourceByResourceId>>> }
+  | { error: unknown };
+
+function snapshotPluginBindings(db: SqliteDb): PluginBindingSnapshot {
+  try {
+    return { bindings: mapWorkspaceResourcesByResourceId(db, 'plugin') };
+  } catch (error) {
+    return { error };
+  }
+}
+
 function pluginVisibleFromWorkspace(
   db: SqliteDb,
   plugin: InstalledPluginRecord,
   scope: string | null | undefined,
   workspaceMemberId: string | null | undefined,
+  snapshot?: PluginBindingSnapshot,
 ): boolean {
   if (scope !== undefined && plugin.sourceKind === 'bundled') return true;
   let binding: ReturnType<typeof getWorkspaceResourceByResourceId>;
   try {
-    binding = getWorkspaceResourceByResourceId(db, 'plugin', plugin.id);
+    if (snapshot && 'error' in snapshot) throw snapshot.error;
+    binding = snapshot
+      ? snapshot.bindings.get(plugin.id)
+      : getWorkspaceResourceByResourceId(db, 'plugin', plugin.id);
   } catch (error) {
     // Narrow plugin-library tests and external embedders may initialize only
     // the plugin schema. Unscoped/local reads do not require Workspace data;
@@ -414,9 +434,10 @@ export function listInstalledPlugins(
 ): InstalledPluginRecord[] {
   const rows = db.prepare(`SELECT * FROM installed_plugins ORDER BY title ASC`).all() as DbRow[];
   const records = rows.map(rowToInstalledPlugin);
+  const bindings = snapshotPluginBindings(db);
   return records.filter((record) =>
     !isInternalBundledStrategyV2(record)
-    && pluginVisibleFromWorkspace(db, record, workspaceId, workspaceMemberId),
+    && pluginVisibleFromWorkspace(db, record, workspaceId, workspaceMemberId, bindings),
   );
 }
 

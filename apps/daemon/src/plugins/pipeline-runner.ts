@@ -18,7 +18,7 @@
 // plug in critique-theater scoring, build-test signals, etc. without
 // changing the public contract.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   AppliedPluginSnapshot,
   GenUISurfaceSpec,
@@ -28,7 +28,7 @@ import { runPipeline, type PipelineEnv, type PipelineEventSink, type StageOutcom
 import { requestOrReuseSurface } from '../genui/registry.js';
 import type { GenUIEventSink } from '../genui/events.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface PipelineRunnerInput {
   db:        SqliteDb;

@@ -22,7 +22,7 @@
 // row for it may appear under the foreign conversation.
 
 import type { Server } from 'node:http';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -78,7 +78,7 @@ describe('run cross-project conversation ownership', () => {
     // directly. app.sqlite lives under the isolated test OD_DATA_DIR.
     const dataDir = process.env.OD_DATA_DIR;
     expect(dataDir).toBeTruthy();
-    const db = new Database(join(dataDir!, 'app.sqlite'), { readonly: true });
+    const db = openDataDirDatabase(dataDir!);
     let landedConversationId: string | null = null;
     try {
       const row = db
@@ -130,7 +130,7 @@ describe('run cross-project conversation ownership', () => {
 
     const dataDir = process.env.OD_DATA_DIR;
     expect(dataDir).toBeTruthy();
-    const db = new Database(join(dataDir!, 'app.sqlite'), { readonly: true });
+    const db = openDataDirDatabase(dataDir!);
     let landedConversationId: string | null = null;
     try {
       const row = db

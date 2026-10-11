@@ -47,7 +47,7 @@ import { readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from '../../src/storage/local-sqlite.js';
 
 const TRIM_LIMIT = 180;
 const OUT = fileURLToPath(new URL('./w123-acp-inflight-frames.json', import.meta.url));
@@ -126,9 +126,9 @@ function main(): void {
 
   for (const dir of readdirSync(SESSION_ROOT)) {
     const dbPath = path.join(SESSION_ROOT, dir, 'data', 'opencode', 'opencode.db');
-    let db: Database.Database;
+    let db: LocalSqliteDatabase;
     try {
-      db = new Database(dbPath, { readonly: true });
+      db = new LocalSqliteDatabase(dbPath, { readonly: true, fileMustExist: true });
     } catch {
       continue;
     }

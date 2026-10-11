@@ -1,11 +1,11 @@
-// SQLite persistence for the chat-artifact versioning tables.
+// Postgres persistence for the chat-artifact versioning tables.
 //
 // Migration contract: ADDITIVE ONLY and RE-RUNNABLE. Every statement is
-// `CREATE … IF NOT EXISTS`, every later column addition is guarded by a
-// `PRAGMA table_info` probe, and nothing here rewrites `produced_files_json`.
-// Running `migrateChatArtifacts` twice over the same file must be a no-op.
+// `CREATE … IF NOT EXISTS`, every later column addition is
+// `ADD COLUMN IF NOT EXISTS`, and nothing here rewrites `produced_files_json`.
+// Running `migrateChatArtifacts` twice over the same schema must be a no-op.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { randomUUID } from 'node:crypto';
 
 import type {
@@ -14,7 +14,7 @@ import type {
   ChatArtifactSnapshotState,
 } from './types.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface WorkspaceArtifactRow {
   id: string;
@@ -140,17 +140,18 @@ export function migrateChatArtifacts(db: SqliteDb): void {
     -- identity: overwrite only moves the digest, rename only moves the path,
     -- and delete leaves a tombstone rather than freeing the id for reuse.
     CREATE TABLE IF NOT EXISTS workspace_artifacts (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      current_path TEXT,
-      kind TEXT NOT NULL,
-      mime TEXT,
-      current_digest TEXT,
-      current_size INTEGER,
-      current_mtime INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      deleted_at INTEGER,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      current_path TEXT COLLATE "C",
+      kind TEXT COLLATE "C" NOT NULL,
+      mime TEXT COLLATE "C",
+      current_digest TEXT COLLATE "C",
+      current_size BIGINT,
+      -- fs.Stats.mtimeMs is fractional; SQLite kept it as REAL.
+      current_mtime DOUBLE PRECISION,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      deleted_at BIGINT,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
@@ -158,80 +159,80 @@ export function migrateChatArtifacts(db: SqliteDb): void {
     -- of the index, so a new file written at a deleted path gets a fresh
     -- identity instead of silently resurrecting the deleted one.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_artifacts_live_path
-      ON workspace_artifacts(project_id, current_path)
+      ON workspace_artifacts(project_id NULLS FIRST, current_path NULLS FIRST)
       WHERE deleted_at IS NULL;
 
     CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_project
-      ON workspace_artifacts(project_id, updated_at DESC);
+      ON workspace_artifacts(project_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     -- Content-addressed blob index. storage_key is a daemon-internal
     -- RELATIVE key under the snapshot root; it is never returned over HTTP and
     -- never accepted from a caller.
     CREATE TABLE IF NOT EXISTS chat_artifact_blobs (
-      digest TEXT PRIMARY KEY,
-      storage_key TEXT NOT NULL,
-      byte_size INTEGER NOT NULL,
-      mime TEXT,
-      created_at INTEGER NOT NULL,
-      last_verified_at INTEGER
+      digest TEXT COLLATE "C" PRIMARY KEY,
+      storage_key TEXT COLLATE "C" NOT NULL,
+      byte_size BIGINT NOT NULL,
+      mime TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      last_verified_at BIGINT
     );
 
     -- Immutable message evidence. One row per capture attempt, including the
     -- ones that failed: a refusal is data, not an absence.
     CREATE TABLE IF NOT EXISTS chat_artifact_snapshots (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      workspace_artifact_id TEXT,
-      source_path_at_capture TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      mime TEXT,
-      content_digest TEXT,
-      thumbnail_digest TEXT,
-      source_size INTEGER,
-      source_mtime INTEGER,
-      expected_size INTEGER,
-      expected_mtime INTEGER,
-      expected_digest TEXT,
-      temp_key TEXT,
-      run_id TEXT,
-      media_task_id TEXT,
-      capture_state TEXT NOT NULL CHECK (capture_state IN
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      workspace_artifact_id TEXT COLLATE "C",
+      source_path_at_capture TEXT COLLATE "C" NOT NULL,
+      kind TEXT COLLATE "C" NOT NULL,
+      mime TEXT COLLATE "C",
+      content_digest TEXT COLLATE "C",
+      thumbnail_digest TEXT COLLATE "C",
+      source_size BIGINT,
+      source_mtime DOUBLE PRECISION,
+      expected_size BIGINT,
+      expected_mtime DOUBLE PRECISION,
+      expected_digest TEXT COLLATE "C",
+      temp_key TEXT COLLATE "C",
+      run_id TEXT COLLATE "C",
+      media_task_id TEXT COLLATE "C",
+      capture_state TEXT COLLATE "C" NOT NULL CHECK (capture_state IN
         ('pending','ready','failed','orphaned')),
-      failure_code TEXT,
-      created_at INTEGER NOT NULL,
-      ready_at INTEGER,
+      failure_code TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      ready_at BIGINT,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY(workspace_artifact_id)
         REFERENCES workspace_artifacts(id) ON DELETE SET NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_chat_artifact_snapshots_project
-      ON chat_artifact_snapshots(project_id, created_at DESC);
+      ON chat_artifact_snapshots(project_id NULLS FIRST, created_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_chat_artifact_snapshots_state
-      ON chat_artifact_snapshots(capture_state, created_at);
+      ON chat_artifact_snapshots(capture_state NULLS FIRST, created_at NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_chat_artifact_snapshots_content
-      ON chat_artifact_snapshots(content_digest);
+      ON chat_artifact_snapshots(content_digest NULLS FIRST);
     CREATE INDEX IF NOT EXISTS idx_chat_artifact_snapshots_thumbnail
-      ON chat_artifact_snapshots(thumbnail_digest);
+      ON chat_artifact_snapshots(thumbnail_digest NULLS FIRST);
 
     -- The join that gives a chat message its cards. Cascades with the message,
     -- which is also what makes conversation delete / project delete / fork work
     -- without a bespoke cleanup pass.
     CREATE TABLE IF NOT EXISTS message_artifacts (
-      message_id TEXT NOT NULL,
-      ordinal INTEGER NOT NULL,
-      id TEXT NOT NULL UNIQUE,
-      snapshot_id TEXT,
-      workspace_artifact_id TEXT,
-      display_policy TEXT NOT NULL CHECK (display_policy IN
+      message_id TEXT COLLATE "C" NOT NULL,
+      ordinal BIGINT NOT NULL,
+      id TEXT COLLATE "C" NOT NULL UNIQUE,
+      snapshot_id TEXT COLLATE "C",
+      workspace_artifact_id TEXT COLLATE "C",
+      display_policy TEXT COLLATE "C" NOT NULL CHECK (display_policy IN
         ('latest_with_static_preview','immutable_snapshot')),
       -- No open_policy column, on purpose: every card opens the workspace's
       -- latest file, so workspace_artifact_id above IS the click target.
       -- See policy.ts for the ruling.
-      label_at_capture TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      html_version_id TEXT,
-      created_at INTEGER NOT NULL,
+      label_at_capture TEXT COLLATE "C" NOT NULL,
+      kind TEXT COLLATE "C" NOT NULL,
+      html_version_id TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
       PRIMARY KEY (message_id, ordinal),
       FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
       FOREIGN KEY(snapshot_id)
@@ -241,59 +242,7 @@ export function migrateChatArtifacts(db: SqliteDb): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_message_artifacts_snapshot
-      ON message_artifacts(snapshot_id);
-  `);
-  dropLegacyOpenPolicyColumn(db);
-}
-
-/**
- * Rebuild `message_artifacts` without `open_policy`.
- *
- * The column was `NOT NULL` with a CHECK constraint, so a database created by
- * an earlier build of this (unreleased) subsystem would reject every insert the
- * current code makes, and SQLite refuses `DROP COLUMN` on a column a CHECK
- * mentions. The rows themselves are still good — only the column is gone — so
- * this copies them across rather than dropping the table.
- */
-function dropLegacyOpenPolicyColumn(db: SqliteDb): void {
-  const columns = db
-    .prepare(`SELECT name FROM pragma_table_info('message_artifacts')`)
-    .all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === 'open_policy')) return;
-  db.exec(`
-    PRAGMA foreign_keys = OFF;
-    BEGIN;
-    CREATE TABLE message_artifacts__rebuild (
-      message_id TEXT NOT NULL,
-      ordinal INTEGER NOT NULL,
-      id TEXT NOT NULL UNIQUE,
-      snapshot_id TEXT,
-      workspace_artifact_id TEXT,
-      display_policy TEXT NOT NULL CHECK (display_policy IN
-        ('latest_with_static_preview','immutable_snapshot')),
-      label_at_capture TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      html_version_id TEXT,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (message_id, ordinal),
-      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY(snapshot_id)
-        REFERENCES chat_artifact_snapshots(id) ON DELETE SET NULL,
-      FOREIGN KEY(workspace_artifact_id)
-        REFERENCES workspace_artifacts(id) ON DELETE SET NULL
-    );
-    INSERT INTO message_artifacts__rebuild
-      (message_id, ordinal, id, snapshot_id, workspace_artifact_id,
-       display_policy, label_at_capture, kind, html_version_id, created_at)
-      SELECT message_id, ordinal, id, snapshot_id, workspace_artifact_id,
-             display_policy, label_at_capture, kind, html_version_id, created_at
-        FROM message_artifacts;
-    DROP TABLE message_artifacts;
-    ALTER TABLE message_artifacts__rebuild RENAME TO message_artifacts;
-    CREATE INDEX IF NOT EXISTS idx_message_artifacts_snapshot
-      ON message_artifacts(snapshot_id);
-    COMMIT;
-    PRAGMA foreign_keys = ON;
+      ON message_artifacts(snapshot_id NULLS FIRST);
   `);
 }
 

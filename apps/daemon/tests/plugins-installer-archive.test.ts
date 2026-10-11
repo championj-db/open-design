@@ -17,14 +17,15 @@ import url from 'node:url';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { mkdtemp, rm, writeFile, mkdir, symlink, readdir, readFile } from 'node:fs/promises';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { c as tarCreate } from 'tar';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import { installPlugin, type ArchiveFetcher } from '../src/plugins/installer.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpRoot: string;
 let pluginsRoot: string;
 
@@ -85,7 +86,7 @@ function makeResponse(body: Buffer | string, status = 200, statusText = 'OK'): A
 beforeEach(async () => {
   tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'od-installer-archive-'));
   pluginsRoot = path.join(tmpRoot, 'plugins');
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

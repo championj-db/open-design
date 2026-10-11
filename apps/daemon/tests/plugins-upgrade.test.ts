@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import { installFromLocalFolder } from '../src/plugins/installer.js';
 import { installPlugin } from '../src/plugins/installer.js';
@@ -18,7 +19,7 @@ import { getInstalledPlugin } from '../src/plugins/registry.js';
 let tmpRoot: string;
 let pluginsRoot: string;
 let sourceFolder: string;
-let db: Database.Database;
+let db: SqlDatabase;
 
 async function writeSource(version: string, opts?: { description?: string }) {
   await writeFile(
@@ -45,7 +46,7 @@ beforeEach(async () => {
   sourceFolder = path.join(tmpRoot, 'source-plugin');
   await mkdir(sourceFolder, { recursive: true });
   await writeSource('1.0.0');
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

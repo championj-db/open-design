@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { safeExternalFetch } from './plugin-asset-cache.js';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   parseMarketplace,
   type MarketplaceParseResult,
@@ -29,7 +29,7 @@ import {
   resolveMarketplaceEntryVersion,
 } from '../registry/versioning.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export type MarketplaceTrustTier = 'official' | 'trusted' | 'restricted';
 

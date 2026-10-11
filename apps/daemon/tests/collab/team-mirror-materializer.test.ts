@@ -20,6 +20,7 @@ import {
 } from '../../src/collab/team-mirror-materializer.js';
 import type { AuthorizedTeamProjectPullReceipt } from '../../src/collab/authorized-team-project-pull.js';
 import { projectResourceIdFor } from '../../src/integrations/vela-team-projects.js';
+import { createAbortTrigger } from '../helpers/test-db.js';
 
 const roots: string[] = [];
 
@@ -291,13 +292,11 @@ describe('authorized team mirror SQLite materialization', () => {
 
   it('rolls back metadata and binding when the exact receipt cursor cannot commit', async () => {
     const db = await database();
-    db.exec(`
-      CREATE TRIGGER reject_team_materialization
-      BEFORE INSERT ON team_project_materializations
-      BEGIN
-        SELECT RAISE(ABORT, 'cursor unavailable');
-      END;
-    `);
+    createAbortTrigger(db, {
+      name: 'reject_team_materialization',
+      event: 'BEFORE INSERT ON team_project_materializations',
+      message: 'cursor unavailable',
+    });
 
     expect(() =>
       materializePulledTeamMirror(db, input, scope, receipt()),

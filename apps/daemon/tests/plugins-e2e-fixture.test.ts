@@ -20,7 +20,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import url from 'node:url';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import { applyPlugin } from '../src/plugins/apply.js';
 import { doctorPlugin } from '../src/plugins/doctor.js';
@@ -34,12 +35,12 @@ const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'plugin-fixtures', 'sample-
 
 let tmpRoot: string;
 let pluginsRoot: string;
-let db: Database.Database;
+let db: SqlDatabase;
 
 beforeEach(async () => {
   tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'od-plugin-e2e-'));
   pluginsRoot = path.join(tmpRoot, 'plugins');
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

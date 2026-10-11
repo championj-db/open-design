@@ -2,7 +2,7 @@ import {
   composeOdNextStrategyContinuationV2,
   type StrategyTaskProjectionV2,
 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 import type {
   InternalPhysicalRun,
@@ -40,7 +40,7 @@ import { composeStrategyIntentResolution, requiresStrategyIntentResolution, isSt
 import { captureIntentResolutionReply, recordStrategyRunWriteEvidence } from './intent-resolution-store.js';
 import { completePlanningIntentResolution, consumeIntentResolutionWithVerdict } from './intent-resolution-finalization.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 const TERMINAL_OUTCOMES = new Set(['completed', 'blocked', 'canceled']);
 

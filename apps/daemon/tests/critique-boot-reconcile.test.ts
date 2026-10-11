@@ -10,7 +10,8 @@ import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import {
   migrateCritique,
   insertCritiqueRun,
@@ -19,22 +20,20 @@ import {
 } from '../src/critique/persistence.js';
 import { defaultCritiqueConfig } from '@open-design/contracts/critique';
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'p1', 0, 0);
@@ -44,7 +43,7 @@ function freshDb(): Database.Database {
 }
 
 let tmpDir: string;
-let db: Database.Database;
+let db: SqlDatabase;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'od-boot-reconcile-test-'));

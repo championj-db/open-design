@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
   defaultCapabilities,
@@ -20,14 +21,14 @@ import {
   validateCapabilityList,
 } from '../src/plugins/trust.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpDir: string;
 
 const PLUGIN_ID = 'sample-plugin';
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), 'od-trust-'));
-  db = new Database(path.join(tmpDir, 'test.sqlite'));
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

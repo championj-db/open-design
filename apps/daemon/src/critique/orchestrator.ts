@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { CritiqueConfig, PanelEvent } from '@open-design/contracts/critique';
 import { panelEventToSse } from '@open-design/contracts/critique';
 import type { CritiqueSseEvent } from '@open-design/contracts/critique';
@@ -75,7 +75,7 @@ export interface OrchestratorParams {
    */
   skill?: string;
   cfg: CritiqueConfig;
-  db: Database.Database;
+  db: SqlDatabase;
   bus: CritiqueSseBus;
   /**
    * Source of CLI stdout. The orchestrator is transport-agnostic: a real

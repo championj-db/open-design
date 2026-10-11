@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,13 +29,13 @@ afterEach(() => {
   }
 });
 
-function createDb(): Database.Database {
+function createDb(): SqlDatabase {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-status-'));
   tempDirs.push(dir);
   return openDatabase(dir, { dataDir: path.join(dir, '.od') });
 }
 
-function seedProject(db: Database.Database, projectId: string, runStatus = 'succeeded') {
+function seedProject(db: SqlDatabase, projectId: string, runStatus = 'succeeded') {
   insertProject(db, {
     id: projectId,
     name: projectId,
@@ -70,7 +70,7 @@ function form(id: string): string {
 }
 
 function addMessage(
-  db: Database.Database,
+  db: SqlDatabase,
   conversationId: string,
   id: string,
   role: 'user' | 'assistant',
@@ -438,7 +438,7 @@ test('conversation listing batches latest run summaries for large projects', () 
       }
       return Reflect.get(target, prop, receiver);
     },
-  }) as Database.Database;
+  }) as SqlDatabase;
 
   const conversations = listConversations(instrumentedDb, 'project-large');
 

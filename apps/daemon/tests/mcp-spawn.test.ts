@@ -11,7 +11,7 @@
 // matches what the daemon does in production.
 
 import type http from 'node:http';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, promises as fsp, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -365,7 +365,7 @@ describe('spawn writes external MCP config for Claude Code', () => {
       if (!process.env.OD_DATA_DIR) {
         throw new Error('OD_DATA_DIR is required for seeded conversation tests');
       }
-      const sqlite = new Database(join(process.env.OD_DATA_DIR, 'app.sqlite'));
+      const sqlite = openDataDirDatabase(process.env.OD_DATA_DIR);
       const recentConversationId = `0-later-${randomUUID()}`;
       try {
         const seeded = sqlite

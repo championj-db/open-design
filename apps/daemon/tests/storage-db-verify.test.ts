@@ -1,23 +1,18 @@
-// Plan §3.LL1 — verifySqliteIntegrity() pure helper.
+// Plan §3.LL1 — verifySqliteIntegrity() pure helper (Postgres constraint check).
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { verifySqliteIntegrity } from '../src/storage/db-inspect.js';
 
-let tmp: string;
-let db: Database.Database;
+let db: SqlDatabase;
 
-beforeEach(async () => {
-  tmp = await mkdtemp(path.join(os.tmpdir(), 'od-db-verify-'));
-  db = new Database(path.join(tmp, 'app.sqlite'));
+beforeEach(() => {
+  db = createTestDatabase({ migrate: false });
 });
 
-afterEach(async () => {
+afterEach(() => {
   db.close();
-  await rm(tmp, { recursive: true, force: true });
 });
 
 describe('verifySqliteIntegrity', () => {
@@ -35,14 +30,16 @@ describe('verifySqliteIntegrity', () => {
     expect(report.ok).toBe(true);
   });
 
-  it('detects foreign-key violations', () => {
-    db.pragma('foreign_keys = OFF');
+  it('detects foreign keys that are not validated against existing rows', () => {
+    // Postgres refuses to insert an orphan under an enforced FK, so the only
+    // way a violation exists is a constraint added NOT VALID over bad rows.
     db.exec(`
-      CREATE TABLE parents (id INTEGER PRIMARY KEY);
-      CREATE TABLE kids    (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents(id));
+      CREATE TABLE parents (id BIGINT PRIMARY KEY);
+      CREATE TABLE kids    (id BIGINT PRIMARY KEY, parent_id BIGINT);
       INSERT INTO kids (id, parent_id) VALUES (1, 999);
+      ALTER TABLE kids ADD CONSTRAINT kids_parent_fk
+        FOREIGN KEY (parent_id) REFERENCES parents(id) NOT VALID;
     `);
-    db.pragma('foreign_keys = ON');
     const report = verifySqliteIntegrity({ db });
     expect(report.ok).toBe(false);
     expect(report.issues.some((i) => i.kind === 'foreign_key')).toBe(true);
@@ -62,8 +59,8 @@ describe('verifySqliteIntegrity', () => {
 
   it('returns ok=true when there are tables but no FK violations', () => {
     db.exec(`
-      CREATE TABLE a (id INTEGER PRIMARY KEY);
-      CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id));
+      CREATE TABLE a (id BIGINT PRIMARY KEY);
+      CREATE TABLE b (id BIGINT PRIMARY KEY, a_id BIGINT REFERENCES a(id));
       INSERT INTO a VALUES (1), (2);
       INSERT INTO b VALUES (1, 1), (2, 2);
     `);

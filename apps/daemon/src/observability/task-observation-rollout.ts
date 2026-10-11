@@ -11,7 +11,7 @@ import {
   type ChildEvidenceCoverageV1,
   type OdNextRolloutDecision,
 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import type { TelemetryPrefs } from '../app-config.js';
 import { buildSafeRunQualityProjectionFromDaemon } from '../langfuse-bridge.js';
@@ -190,7 +190,7 @@ export interface TaskObservationFinalizationHandle {
 }
 
 export interface CreateTaskObservationRolloutServiceOptions {
-  db: Database.Database;
+  db: SqlDatabase;
   getRun(runId: string): TaskRunLike | null | undefined;
   dataDir?: string;
   readTelemetry(): Promise<{
@@ -265,90 +265,33 @@ export function readTaskObservationRolloutConfig(
   };
 }
 
-export function migrateTaskObservationRolloutStore(db: Database.Database): void {
-  const createV2Table = (name: string) => db.exec(`
-    CREATE TABLE ${name} (
-      task_execution_id TEXT PRIMARY KEY,
-      mode TEXT NOT NULL CHECK (mode IN ('observe', 'send')),
-      environment TEXT NOT NULL,
-      tag TEXT NOT NULL,
-      aggregate_digest TEXT,
-      observation_count INTEGER NOT NULL DEFAULT 0 CHECK (observation_count >= 0),
-      coverage_json TEXT,
-      status TEXT NOT NULL CHECK (
+export function migrateTaskObservationRolloutStore(db: SqlDatabase): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS strategy_task_observation_delivery (
+      task_execution_id TEXT COLLATE "C" PRIMARY KEY,
+      mode TEXT COLLATE "C" NOT NULL CHECK (mode IN ('observe', 'send')),
+      environment TEXT COLLATE "C" NOT NULL,
+      tag TEXT COLLATE "C" NOT NULL,
+      aggregate_digest TEXT COLLATE "C",
+      observation_count BIGINT NOT NULL DEFAULT 0 CHECK (observation_count >= 0),
+      coverage_json TEXT COLLATE "C",
+      status TEXT COLLATE "C" NOT NULL CHECK (
         status IN (
           'observed', 'compatibility', 'pending', 'in_flight',
           'accepted', 'not_expected'
         )
       ),
-      idempotency_key TEXT,
-      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-      crash_window INTEGER NOT NULL DEFAULT 0 CHECK (crash_window IN (0, 1)),
-      started_at INTEGER NOT NULL,
-      drop_reason TEXT,
-      finalized_at INTEGER,
-      updated_at INTEGER NOT NULL,
+      idempotency_key TEXT COLLATE "C",
+      attempt_count BIGINT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      crash_window BIGINT NOT NULL DEFAULT 0 CHECK (crash_window IN (0, 1)),
+      started_at BIGINT NOT NULL,
+      drop_reason TEXT COLLATE "C",
+      finalized_at BIGINT,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(task_execution_id) REFERENCES strategy_task_executions(task_execution_id)
         ON DELETE CASCADE
     )
   `);
-  const existing = db.prepare(`
-    SELECT sql FROM sqlite_master
-     WHERE type = 'table' AND name = 'strategy_task_observation_delivery'
-  `).get() as { sql?: string } | undefined;
-  if (!existing) {
-    createV2Table('strategy_task_observation_delivery');
-    return;
-  }
-  if (existing.sql?.includes("'compatibility'") && existing.sql.includes("'pending'")) {
-    return;
-  }
-  db.transaction(() => {
-    db.exec('DROP TABLE IF EXISTS strategy_task_observation_delivery_v2');
-    createV2Table('strategy_task_observation_delivery_v2');
-    db.exec(`
-      INSERT INTO strategy_task_observation_delivery_v2 (
-        task_execution_id, mode, environment, tag,
-        aggregate_digest, observation_count, coverage_json,
-        status, idempotency_key, attempt_count, crash_window,
-        started_at, drop_reason, finalized_at, updated_at
-      )
-      SELECT task_execution_id, mode, environment, tag,
-             aggregate_digest, observation_count, coverage_json,
-             CASE
-               WHEN status = 'in_flight' THEN 'pending'
-               WHEN status = 'failed' AND attempt_count = 0 AND drop_reason IN (
-                 'payload_build_error', 'payload_too_large',
-                 'export_mapping_mismatch', 'schema_capability_missing'
-               ) THEN 'compatibility'
-               WHEN status = 'failed' THEN 'pending'
-               WHEN status = 'not_expected' AND drop_reason IN (
-                 'missing_sink_config', 'task_rollout_context_missing',
-                 'mode_not_send', 'schema_capability_missing'
-               ) THEN 'compatibility'
-               WHEN status = 'not_expected' AND drop_reason NOT IN (
-                 'metrics_consent_off', 'content_consent_off'
-               ) THEN 'pending'
-               WHEN status = 'not_expected' AND drop_reason IS NULL THEN 'pending'
-               ELSE status
-             END,
-             idempotency_key, attempt_count, 0, started_at, drop_reason,
-             CASE
-               WHEN status IN ('accepted', 'observed') THEN finalized_at
-               WHEN status = 'not_expected' AND drop_reason IN (
-                 'metrics_consent_off', 'content_consent_off'
-               ) THEN finalized_at
-               ELSE NULL
-             END,
-             updated_at
-        FROM strategy_task_observation_delivery
-    `);
-    db.exec('DROP TABLE strategy_task_observation_delivery');
-    db.exec(`
-      ALTER TABLE strategy_task_observation_delivery_v2
-      RENAME TO strategy_task_observation_delivery
-    `);
-  }).immediate();
 }
 
 function rowFromDb(row: Record<string, unknown>): TaskObservationDeliveryRow {
@@ -374,7 +317,7 @@ function rowFromDb(row: Record<string, unknown>): TaskObservationDeliveryRow {
 }
 
 function readDeliveryRow(
-  db: Database.Database,
+  db: SqlDatabase,
   taskExecutionId: string,
 ): TaskObservationDeliveryRow | null {
   const row = db.prepare(`
@@ -1218,7 +1161,7 @@ export function createTaskObservationRolloutService(
       options.db.prepare(`
         UPDATE strategy_task_observation_delivery
            SET status = ?, mode = ?, drop_reason = ?,
-               finalized_at = CASE WHEN ? = 'observed' THEN ? ELSE NULL END,
+               finalized_at = CASE WHEN ? = 'observed' THEN CAST(? AS BIGINT) ELSE NULL END,
                updated_at = ?
          WHERE task_execution_id = ?
            AND status = 'pending' AND drop_reason = 'eligibility_pending'

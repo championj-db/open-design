@@ -457,7 +457,6 @@ if (phase === "describe") {
   process.exit(0);
 }
 const materializeEnabled = externalEntry?.materializeDomToPptx ?? phase !== "build";
-const nativeProbeEnabled = externalEntry?.probeNativeDependencies ?? phase !== "build";
 const buildEnabled = externalEntry != null ? externalEntry.resolvedTargets.length > 0 : phase !== "dependencies";
 if (materializeEnabled) materializeDomToPptxBundle();
 try {
@@ -467,65 +466,6 @@ try {
   process.exit(1);
 }
 
-if (!nativeProbeEnabled) process.exit(0);
-
-// Verify the better-sqlite3 native addon loads under the current Node.js ABI.
-// better-sqlite3 is a dep of apps/daemon (not the workspace root), so resolve
-// it from the daemon package context. prebuild-install may have fetched a
-// prebuilt binary for a different ABI (e.g. after switching between Node 22 /
-// 24 / 25). When the addon fails to dlopen, pnpm rebuild handles the rebuild
-// using its own node-gyp lifecycle — no assumptions about where node-gyp lives.
-const req = createRequire(resolve(repoRoot, "apps/daemon/package.json"));
-let needsRebuild = false;
-const nativeProbeStartedAt = Date.now();
-const nativeProbeStarted = performance.now();
-try {
-  // Try to actually use the native addon; merely requiring the JS wrapper
-  // succeeds even when the binary is missing (e.g. after `pnpm install --ignore-scripts`).
-  const Database = req("better-sqlite3");
-  new Database(":memory:");
-} catch (e) {
-  // MODULE_NOT_FOUND means daemon deps aren't installed yet — not our problem.
-  // Any other error (missing binary, ERR_DLOPEN_FAILED, ABI mismatch, etc.) warrants a rebuild.
-  if (e?.code !== "MODULE_NOT_FOUND") {
-    needsRebuild = true;
-  }
-}
-recordTiming({
-  durationMs: performance.now() - nativeProbeStarted,
-  operation: "better-sqlite3-probe",
-  startedAt: nativeProbeStartedAt,
-  status: "success",
-});
-receiptOperations.push({ operation: "better-sqlite3-probe", status: "success" });
-
-if (needsRebuild) {
-  process.stdout.write(
-    `postinstall: rebuilding better-sqlite3 for Node.js ${process.version}...\n`,
-  );
-  const rebuildStartedAt = Date.now();
-  const rebuildStarted = performance.now();
-  const rebuild = spawnSync(
-    packageManager.command,
-    [...packageManager.argsPrefix, "--filter", "@open-design/daemon", "rebuild", "better-sqlite3"],
-    { cwd: repoRoot, stdio: "inherit" },
-  );
-  recordTiming({
-    durationMs: performance.now() - rebuildStarted,
-    operation: "better-sqlite3-rebuild",
-    startedAt: rebuildStartedAt,
-    status: rebuild.error == null && rebuild.status === 0 ? "success" : "failure",
-  });
-  receiptOperations.push({
-    operation: "better-sqlite3-rebuild",
-    status: rebuild.error == null && rebuild.status === 0 ? "success" : "failure",
-  });
-  if (rebuild.error != null) throw rebuild.error;
-  if (rebuild.status !== 0) {
-    process.stderr.write(
-      "postinstall: better-sqlite3 rebuild failed.\n" +
-        "Install build tools (python3, make, g++ or clang++) then run: pnpm install\n",
-    );
-    process.exit(rebuild.status ?? 1);
-  }
-}
+// `probeNativeDependencies` used to gate a better-sqlite3 ABI probe/rebuild.
+// The daemon's database is Postgres now and no install-time native probe is
+// needed; the flag stays in the plan contract for compatibility.

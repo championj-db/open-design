@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import Database from 'better-sqlite3';
+import { LocalSqliteDatabase } from '../../src/storage/local-sqlite.js';
 import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -220,7 +220,7 @@ describe('collectCodexChildEvidence', () => {
     expect(before.availability).toBe('complete');
     const archive = path.join(home, 'archived_sessions');
     await mkdir(archive);
-    const db = new Database(path.join(home, 'state_5.sqlite'));
+    const db = new LocalSqliteDatabase(path.join(home, 'state_5.sqlite'));
     try {
       db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, archived INTEGER NOT NULL)');
       for (const [id, filePath] of [[PARENT, parentPath], [CHILD, childPath]] as const) {
@@ -243,7 +243,7 @@ describe('collectCodexChildEvidence', () => {
     await mkdir(archive);
     const archivedParent = path.join(archive, path.basename(parentPath));
     await writeFile(archivedParent, readFileSync(parentPath));
-    const db = new Database(path.join(home, 'state_5.sqlite'));
+    const db = new LocalSqliteDatabase(path.join(home, 'state_5.sqlite'));
     try {
       db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, archived INTEGER NOT NULL)');
       db.prepare('INSERT INTO threads VALUES (?, ?, 1)').run(PARENT, archivedParent);

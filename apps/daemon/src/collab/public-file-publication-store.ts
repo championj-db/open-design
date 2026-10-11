@@ -1,6 +1,6 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface PublicFilePublicationScope {
   resourceTeamId: string;
@@ -27,15 +27,15 @@ export interface PublicFilePublicationStore {
 export function migratePublicFilePublications(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS public_file_publications (
-      resource_team_id TEXT NOT NULL,
-      owner_member_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      url TEXT NOT NULL,
-      slug TEXT NOT NULL,
-      file_name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      resource_team_id TEXT COLLATE "C" NOT NULL,
+      owner_member_id TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C" NOT NULL,
+      file_path TEXT COLLATE "C" NOT NULL,
+      url TEXT COLLATE "C" NOT NULL,
+      slug TEXT COLLATE "C" NOT NULL,
+      file_name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path)
     );
   `);

@@ -11,7 +11,7 @@
 // Handing out a URL for a half-written snapshot renders as a broken image,
 // which is strictly worse than the live-preview fallback it displaced.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { ProjectFileKind } from '@open-design/contracts';
 
 import {
@@ -37,7 +37,7 @@ export function chatArtifactSnapshotThumbnailUrl(projectId: string, snapshotId: 
 }
 
 export function projectChatArtifactRefs(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
   messageId: string,
 ): ChatArtifactRef[] {
@@ -49,7 +49,7 @@ export function projectChatArtifactRefs(
  * whole conversations, so a per-row lookup would be a straight N+1.
  */
 export function projectConversationChatArtifactRefs(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
   conversationId: string,
 ): Map<string, ChatArtifactRef[]> {
@@ -62,7 +62,7 @@ export function projectConversationChatArtifactRefs(
 }
 
 function toRef(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
   row: MessageArtifactRow,
 ): ChatArtifactRef {

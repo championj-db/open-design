@@ -2,9 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Database from "better-sqlite3";
 
 import { closeDatabase, openDatabase } from "../../src/db.js";
+import { holdTableLock } from "../helpers/test-db.js";
 import {
   createAmrTerminalReportDeliveryService,
   createAmrTerminalReportFinalizer,
@@ -21,6 +21,7 @@ const createRuns = (options: Record<string, unknown>): any =>
 let tempDir: string | null = null;
 
 afterEach(() => {
+  delete process.env.OD_PG_LOCK_TIMEOUT_MS;
   vi.useRealTimers();
   closeDatabase();
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
@@ -29,6 +30,7 @@ afterEach(() => {
 
 function createFixture() {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "od-amr-terminal-reports-"));
+  process.env.OD_PG_LOCK_TIMEOUT_MS = "50";
   const db = openDatabase(tempDir);
   const outbox = createAmrTerminalReportOutboxStore(db);
   const runs = createRuns({
@@ -218,9 +220,7 @@ describe("AMR terminal report outbox", () => {
     });
     delivery.start();
 
-    db.pragma('busy_timeout = 0');
-    const blocker = new Database(db.name);
-    blocker.exec('BEGIN IMMEDIATE');
+    const blocker = holdTableLock(path.join(tempDir!, '.od'), 'amr_terminal_report_outbox');
     const run = runs.create({ agentId: 'amr' });
     try {
       runs.finish(run, 'failed', 1, null);
@@ -305,6 +305,7 @@ describe("AMR terminal report outbox", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-05T05:00:00.000Z"));
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "od-amr-terminal-reports-"));
+    process.env.OD_PG_LOCK_TIMEOUT_MS = "50";
     const db = openDatabase(tempDir);
     const outbox = createAmrTerminalReportOutboxStore(db);
     const runsLogDir = path.join(tempDir, "runs");
@@ -334,6 +335,7 @@ describe("AMR terminal report outbox", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-05T06:00:00.000Z"));
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "od-amr-terminal-reports-"));
+    process.env.OD_PG_LOCK_TIMEOUT_MS = "50";
     const db = openDatabase(tempDir);
     const outbox = createAmrTerminalReportOutboxStore(db);
     const runsLogDir = path.join(tempDir, "runs");

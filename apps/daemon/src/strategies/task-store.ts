@@ -23,7 +23,7 @@ import {
   type StrategyOutcomeV2,
   type StrategyRouteV2,
 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 
 import { getSnapshot } from '../plugins/snapshots.js';
 import {
@@ -40,7 +40,7 @@ import {
   type StrategyIntentResolution,
 } from './od-next/intent-resolution-store.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type DbRow = Record<string, unknown>;
 
 const TASK_STORE_SCHEMA_VERSION = 1 as const;
@@ -220,87 +220,87 @@ export class StrategyTaskTransitionConflictError extends Error {
 export function migrateStrategyTaskStore(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS strategy_task_executions (
-      task_execution_id TEXT PRIMARY KEY,
-      schema_version INTEGER NOT NULL DEFAULT 1,
-      revision INTEGER NOT NULL DEFAULT 0,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      snapshot_id TEXT NOT NULL,
-      strategy_id TEXT NOT NULL,
-      strategy_version TEXT NOT NULL,
-      strategy_package_hash TEXT NOT NULL,
-      selected_agent_id TEXT NOT NULL,
-      route TEXT CHECK (route IN ('direct_edit', 'full_plan')),
-      input_stage TEXT NOT NULL CHECK (
+      task_execution_id TEXT COLLATE "C" PRIMARY KEY,
+      schema_version BIGINT NOT NULL DEFAULT 1,
+      revision BIGINT NOT NULL DEFAULT 0,
+      project_id TEXT COLLATE "C" NOT NULL,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      snapshot_id TEXT COLLATE "C" NOT NULL,
+      strategy_id TEXT COLLATE "C" NOT NULL,
+      strategy_version TEXT COLLATE "C" NOT NULL,
+      strategy_package_hash TEXT COLLATE "C" NOT NULL,
+      selected_agent_id TEXT COLLATE "C" NOT NULL,
+      route TEXT COLLATE "C" CHECK (route IN ('direct_edit', 'full_plan')),
+      input_stage TEXT COLLATE "C" NOT NULL CHECK (
         input_stage IN ('request', 'clarification', 'contract_repair', 'production')
       ),
-      outcome TEXT NOT NULL CHECK (
+      outcome TEXT COLLATE "C" NOT NULL CHECK (
         outcome IN (
           'running', 'clarification_required', 'plan_ready',
           'completed', 'blocked', 'canceled'
         )
       ),
-      execution_mode TEXT CHECK (execution_mode IN ('simple', 'complex')),
-      execution_intent TEXT NOT NULL DEFAULT 'produce',
-      plan_contract_json TEXT,
-      plan_contract_hash TEXT,
-      clarification_count INTEGER NOT NULL DEFAULT 0 CHECK (clarification_count BETWEEN 0 AND 1),
-      plan_contract_repair_attempts INTEGER NOT NULL DEFAULT 0 CHECK (
+      execution_mode TEXT COLLATE "C" CHECK (execution_mode IN ('simple', 'complex')),
+      execution_intent TEXT COLLATE "C" NOT NULL DEFAULT 'produce',
+      plan_contract_json TEXT COLLATE "C",
+      plan_contract_hash TEXT COLLATE "C",
+      clarification_count BIGINT NOT NULL DEFAULT 0 CHECK (clarification_count BETWEEN 0 AND 1),
+      plan_contract_repair_attempts BIGINT NOT NULL DEFAULT 0 CHECK (
         plan_contract_repair_attempts BETWEEN 0 AND 1
       ),
-      initial_run_id TEXT NOT NULL,
-      latest_run_id TEXT NOT NULL,
-      prompt_bundle_schema TEXT,
-      prompt_bundle_text TEXT,
-      prompt_bundle_utf8_bytes INTEGER,
-      prompt_bundle_sha256 TEXT,
-      frozen_input_identity_json TEXT,
-      blocked_reason_codes_json TEXT,
-      blocked_visible_text TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      initial_run_id TEXT COLLATE "C" NOT NULL,
+      latest_run_id TEXT COLLATE "C" NOT NULL,
+      prompt_bundle_schema TEXT COLLATE "C",
+      prompt_bundle_text TEXT COLLATE "C",
+      prompt_bundle_utf8_bytes BIGINT,
+      prompt_bundle_sha256 TEXT COLLATE "C",
+      frozen_input_identity_json TEXT COLLATE "C",
+      blocked_reason_codes_json TEXT COLLATE "C",
+      blocked_visible_text TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(snapshot_id) REFERENCES applied_plugin_snapshots(id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_strategy_task_executions_project_conversation
-      ON strategy_task_executions(project_id, conversation_id, updated_at DESC);
+      ON strategy_task_executions(project_id NULLS FIRST, conversation_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE TABLE IF NOT EXISTS strategy_task_runs (
-      task_execution_id TEXT NOT NULL,
-      run_id TEXT NOT NULL UNIQUE,
-      input_stage TEXT NOT NULL CHECK (
+      task_execution_id TEXT COLLATE "C" NOT NULL,
+      run_id TEXT COLLATE "C" NOT NULL UNIQUE,
+      input_stage TEXT COLLATE "C" NOT NULL CHECK (
         input_stage IN ('request', 'clarification', 'contract_repair', 'production')
       ),
-      task_run_index INTEGER NOT NULL CHECK (task_run_index >= 0),
-      source_run_id TEXT,
-      final_text_kind TEXT,
-      final_text_schema TEXT,
-      final_text TEXT,
-      final_text_utf8_bytes INTEGER,
-      final_text_sha256 TEXT,
-      created_at INTEGER NOT NULL,
+      task_run_index BIGINT NOT NULL CHECK (task_run_index >= 0),
+      source_run_id TEXT COLLATE "C",
+      final_text_kind TEXT COLLATE "C",
+      final_text_schema TEXT COLLATE "C",
+      final_text TEXT COLLATE "C",
+      final_text_utf8_bytes BIGINT,
+      final_text_sha256 TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
       PRIMARY KEY(task_execution_id, task_run_index),
       FOREIGN KEY(task_execution_id) REFERENCES strategy_task_executions(task_execution_id)
         ON DELETE CASCADE
     );
   `);
-  addColumnIfMissing(db, 'strategy_task_executions', "execution_intent TEXT NOT NULL DEFAULT 'produce'");
-  addColumnIfMissing(db, 'strategy_task_executions', 'intent_resolution_version INTEGER');
+  addColumnIfMissing(db, 'strategy_task_executions', `execution_intent TEXT COLLATE "C" NOT NULL DEFAULT 'produce'`);
+  addColumnIfMissing(db, 'strategy_task_executions', 'intent_resolution_version BIGINT');
   migrateIntentResolutionStore(db);
-  addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_schema TEXT');
-  addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_text TEXT');
-  addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_utf8_bytes INTEGER');
-  addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_sha256 TEXT');
-  addColumnIfMissing(db, 'strategy_task_executions', 'frozen_input_identity_json TEXT');
-  addColumnIfMissing(db, 'strategy_task_executions', 'blocked_reason_codes_json TEXT');
-  addColumnIfMissing(db, 'strategy_task_executions', 'blocked_visible_text TEXT');
-  addColumnIfMissing(db, 'strategy_task_runs', 'final_text_kind TEXT');
-  addColumnIfMissing(db, 'strategy_task_runs', 'final_text_schema TEXT');
-  addColumnIfMissing(db, 'strategy_task_runs', 'final_text TEXT');
-  addColumnIfMissing(db, 'strategy_task_runs', 'final_text_utf8_bytes INTEGER');
-  addColumnIfMissing(db, 'strategy_task_runs', 'final_text_sha256 TEXT');
+  addColumnIfMissing(db, 'strategy_task_executions', `prompt_bundle_schema TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_executions', `prompt_bundle_text TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_utf8_bytes BIGINT');
+  addColumnIfMissing(db, 'strategy_task_executions', `prompt_bundle_sha256 TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_executions', `frozen_input_identity_json TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_executions', `blocked_reason_codes_json TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_executions', `blocked_visible_text TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_runs', `final_text_kind TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_runs', `final_text_schema TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_runs', `final_text TEXT COLLATE "C"`);
+  addColumnIfMissing(db, 'strategy_task_runs', 'final_text_utf8_bytes BIGINT');
+  addColumnIfMissing(db, 'strategy_task_runs', `final_text_sha256 TEXT COLLATE "C"`);
   migrateFrozenSkillPackageStore(db);
 }
 
@@ -1189,11 +1189,7 @@ function parseStoredBlockedContext(
 }
 
 function addColumnIfMissing(db: SqliteDb, table: string, definition: string): void {
-  const column = definition.split(/\s+/u)[0];
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as DbRow[];
-  if (!columns.some((entry) => entry['name'] === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
-  }
+  db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${definition}`);
 }
 
 function insertableFrozenSkillPackage(value: FrozenSkillPackageV1): FrozenSkillPackageV1 {

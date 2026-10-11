@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { closeDatabase, openDatabase } from '../src/db.js';
+import { tableColumns } from './helpers/test-db.js';
 import {
   deleteWorkspaceArtifact,
   ensureWorkspaceArtifactForPath,
@@ -64,7 +65,7 @@ describe('chat artifact schema', () => {
     const db = open();
     const names = new Set(
       (db
-        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+        .prepare(`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()`)
         .all() as Array<{ name: string }>).map((r) => r.name),
     );
     expect(names.has('workspace_artifacts')).toBe(true);
@@ -72,9 +73,7 @@ describe('chat artifact schema', () => {
     expect(names.has('chat_artifact_snapshots')).toBe(true);
     expect(names.has('message_artifacts')).toBe(true);
 
-    const messageCols = (db
-      .prepare(`PRAGMA table_info(messages)`)
-      .all() as Array<{ name: string }>).map((c) => c.name);
+    const messageCols = tableColumns(db, 'messages');
     // The legacy column stays exactly as it was: additive migration only.
     expect(messageCols).toContain('produced_files_json');
   });

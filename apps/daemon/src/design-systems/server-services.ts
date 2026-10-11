@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   readTeamResourceMaterialization,
   teamResourceWorkspaceRoot,
@@ -115,7 +115,7 @@ type DesignSystemUserReadScope = {
  * systems, mirroring the catalog lane (spec 04 §10).
  */
 function designSystemUserReadOptions(
-  db: Database.Database | undefined,
+  db: SqlDatabase | undefined,
   id: string,
   scope: DesignSystemUserReadScope,
 ): Pick<DesignSystemListOptions, 'idPrefix' | 'workspaceId'> | null {
@@ -156,7 +156,7 @@ export function createDesignSystemServerServices({
   // getter (not the db value itself) because this factory runs BEFORE
   // server.ts opens its database connection; the closure defers the read
   // until a request actually needs it, long after `openDatabase()` has run.
-  getDb?: () => Database.Database;
+  getDb?: () => SqlDatabase;
   roots: {
     SKILL_ROOTS: string[];
     DESIGN_TEMPLATE_ROOTS: string[];
@@ -171,7 +171,7 @@ export function createDesignSystemServerServices({
     listSkills: (
       roots: string[],
       options?: {
-        db?: Database.Database;
+        db?: SqlDatabase;
         workspaceId?: string | null;
         workspaceMemberId?: string | null;
       },
@@ -202,9 +202,9 @@ export function createDesignSystemServerServices({
     }>;
   };
   projects: {
-    getProject: (db: Database.Database, id: string) => ProjectRecord | null | undefined;
-    insertProject: (db: Database.Database, project: ProjectInsert) => ProjectRecord | null | undefined;
-    updateProject: (db: Database.Database, id: string, patch: ProjectPatch) => ProjectRecord | null | undefined;
+    getProject: (db: SqlDatabase, id: string) => ProjectRecord | null | undefined;
+    insertProject: (db: SqlDatabase, project: ProjectInsert) => ProjectRecord | null | undefined;
+    updateProject: (db: SqlDatabase, id: string, patch: ProjectPatch) => ProjectRecord | null | undefined;
     readProjectFile: (projectsDir: string, projectId: string, filePath: string, metadata?: JsonRecord) => Promise<{ buffer: Buffer }>;
     writeProjectFile: (projectsDir: string, projectId: string, filePath: string, content: Buffer, options?: JsonRecord, metadata?: JsonRecord) => Promise<unknown>;
     listFiles: (projectsDir: string, projectId: string, options?: { metadata?: JsonRecord }) => Promise<unknown[]>;
@@ -662,7 +662,7 @@ export function createDesignSystemServerServices({
   }
 
   async function resolveDesignSystemWorkspaceProject(
-    dbHandle: Database.Database,
+    dbHandle: SqlDatabase,
     id: string,
     options: DesignSystemWorkspaceOptions = {},
   ) {
@@ -727,7 +727,7 @@ export function createDesignSystemServerServices({
   }
 
   async function ensureUserDesignSystemWorkspaceProject(
-    dbHandle: Database.Database,
+    dbHandle: SqlDatabase,
     id: string,
     options: DesignSystemWorkspaceOptions = {},
   ) {
@@ -838,7 +838,7 @@ export function createDesignSystemServerServices({
   }
 
   async function readDesignSystemWorkspaceTextFile(
-    dbHandle: Database.Database,
+    dbHandle: SqlDatabase,
     summary: DesignSystemSummary | null | undefined,
     filePath: string,
   ) {
@@ -871,7 +871,7 @@ export function createDesignSystemServerServices({
    * direction — from the project mirror back to canonical.
    */
   async function syncUserDesignSystemAssetsFromWorkspace(
-    dbHandle: Database.Database,
+    dbHandle: SqlDatabase,
     id: string,
     options: DesignSystemWorkspaceOptions = {},
   ): Promise<DesignSystemAssetSyncOutcome> {
@@ -924,7 +924,7 @@ export function createDesignSystemServerServices({
    * closed so a repeat "Sync to team" can never publish stale bytes.
    */
   async function resolveUserDesignSystemShareDirectory(
-    dbHandle: Database.Database,
+    dbHandle: SqlDatabase,
     id: string,
   ): Promise<string> {
     const outcome = await syncUserDesignSystemAssetsFromWorkspace(dbHandle, id);

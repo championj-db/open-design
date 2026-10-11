@@ -12,6 +12,7 @@ import {
   upsertMessage,
 } from '../src/db.js';
 import { runMessageEventPayloadHealPass } from '../src/storage/message-event-payload-heal.js';
+import { createRowTrigger } from './helpers/test-db.js';
 import {
   jsonBytes,
   legacyCursorTurnEvents,
@@ -85,14 +86,20 @@ function storedEventsJson(db: Db, id: string): string {
 
 function countEventWrites(db: Db): () => number {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS heal_test_writes (count INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS heal_test_writes (count BIGINT NOT NULL);
     DELETE FROM heal_test_writes;
     INSERT INTO heal_test_writes (count) VALUES (0);
-    CREATE TRIGGER IF NOT EXISTS heal_test_message_writes AFTER UPDATE OF events_json ON messages
-      BEGIN UPDATE heal_test_writes SET count = count + 1; END;
-    CREATE TRIGGER IF NOT EXISTS heal_test_batch_writes AFTER UPDATE OF events_json ON message_event_batches
-      BEGIN UPDATE heal_test_writes SET count = count + 1; END;
   `);
+  for (const [name, table] of [
+    ['heal_test_message_writes', 'messages'],
+    ['heal_test_batch_writes', 'message_event_batches'],
+  ] as const) {
+    createRowTrigger(db, {
+      name,
+      event: `AFTER UPDATE OF events_json ON ${table}`,
+      body: 'UPDATE heal_test_writes SET count = count + 1;',
+    });
+  }
   return () => (db.prepare(`SELECT count FROM heal_test_writes`).get() as { count: number }).count;
 }
 

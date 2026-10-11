@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { createTestDatabase, tableExists } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import {
   migrateCritique,
   insertCritiqueRun,
@@ -12,24 +13,22 @@ import {
   type CritiqueRunRow,
 } from '../src/critique/persistence.js';
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   // The persistence module has FKs into projects/conversations; create stubs
   // with the columns the FK references actually need.
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'p1', 0, 0);
@@ -41,15 +40,12 @@ function freshDb(): Database.Database {
 }
 
 describe('critique persistence', () => {
-  let db: Database.Database;
+  let db: SqlDatabase;
   beforeEach(() => { db = freshDb(); });
 
   it('migrate is idempotent', () => {
     expect(() => { migrateCritique(db); migrateCritique(db); }).not.toThrow();
-    const tables = db.prepare(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='critique_runs'`,
-    ).all() as Array<{ name: string }>;
-    expect(tables.length).toBe(1);
+    expect(tableExists(db, 'critique_runs')).toBe(true);
   });
 
   it('insert + get round-trips a row with rounds payload preserved', () => {

@@ -26,11 +26,10 @@
 // fixtures this script created.
 
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
@@ -86,7 +85,6 @@ interface SeedProjectSummary {
 
 interface OfflineDatabase {
   exec: (sql: string) => void;
-  pragma: (sql: string) => void;
   prepare: (sql: string) => {
     all: (...args: unknown[]) => unknown[];
     get: (...args: unknown[]) => unknown;
@@ -605,102 +603,22 @@ function assertOfflineDataDirIsExplicit(args: Args): void {
   }
 }
 
-function loadBetterSqlite(): new (filename: string) => OfflineDatabase {
-  const daemonRequire = createRequire(path.join(REPO_ROOT, 'apps', 'daemon', 'package.json'));
-  return daemonRequire('better-sqlite3') as new (filename: string) => OfflineDatabase;
-}
-
-function ensureColumn(db: OfflineDatabase, table: string, column: string, definition: string): void {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<Record<string, unknown>>;
-  if (!cols.some((c) => c['name'] === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
-
-function migrateOffline(db: OfflineDatabase): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      skill_id TEXT,
-      design_system_id TEXT,
-      pending_prompt TEXT,
-      metadata_json TEXT,
-      applied_plugin_snapshot_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      title TEXT,
-      applied_plugin_snapshot_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_conv_project
-      ON conversations(project_id, updated_at DESC);
-
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      agent_id TEXT,
-      agent_name TEXT,
-      run_id TEXT,
-      run_status TEXT,
-      last_run_event_id TEXT,
-      events_json TEXT,
-      attachments_json TEXT,
-      comment_attachments_json TEXT,
-      produced_files_json TEXT,
-      started_at INTEGER,
-      ended_at INTEGER,
-      position INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_messages_conv
-      ON messages(conversation_id, position);
-
-    CREATE TABLE IF NOT EXISTS tabs (
-      project_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY(project_id, name),
-      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tabs_project
-      ON tabs(project_id, position);
-  `);
-  ensureColumn(db, 'projects', 'metadata_json', 'TEXT');
-  ensureColumn(db, 'projects', 'applied_plugin_snapshot_id', 'TEXT');
-  ensureColumn(db, 'conversations', 'applied_plugin_snapshot_id', 'TEXT');
-  ensureColumn(db, 'messages', 'agent_id', 'TEXT');
-  ensureColumn(db, 'messages', 'agent_name', 'TEXT');
-  ensureColumn(db, 'messages', 'run_id', 'TEXT');
-  ensureColumn(db, 'messages', 'run_status', 'TEXT');
-  ensureColumn(db, 'messages', 'last_run_event_id', 'TEXT');
-  ensureColumn(db, 'messages', 'comment_attachments_json', 'TEXT');
-  ensureColumn(db, 'messages', 'produced_files_json', 'TEXT');
+// The daemon's relational store is Postgres, located by DATABASE_URL / PG* /
+// LAKEBASE_* env (see apps/daemon/src/storage/daemon-db.ts). Offline ingest
+// opens it through the built daemon, which also applies the schema migrations.
+async function openDaemonDatabase(dataDir: string): Promise<OfflineDatabase> {
+  const dbModule = pathToFileURL(path.join(REPO_ROOT, 'apps', 'daemon', 'dist', 'db.js')).href;
+  const { openDatabase } = (await import(dbModule)) as {
+    openDatabase: (projectRoot: string, options: { dataDir: string }) => OfflineDatabase;
+  };
+  return openDatabase(REPO_ROOT, { dataDir });
 }
 
 async function openOfflineSeedContext(args: Args): Promise<OfflineSeedContext> {
   assertOfflineDataDirIsExplicit(args);
   const dataDir = resolveDataDir(args.dataDir);
   await mkdir(dataDir, { recursive: true });
-  const Database = loadBetterSqlite();
-  const db = new Database(path.join(dataDir, 'app.sqlite'));
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  migrateOffline(db);
+  const db = await openDaemonDatabase(dataDir);
   const projectsDir = path.join(dataDir, 'projects');
   await mkdir(projectsDir, { recursive: true });
   return { db, dataDir, projectsDir };

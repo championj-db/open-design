@@ -10,13 +10,13 @@
 // Deletes never happen on a UI request path. Project delete and conversation
 // delete drop refs through the FK cascade and leave the bytes to this sweep.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import fs from 'node:fs';
 
 import type { ChatArtifactBlobStore } from './blob-store.js';
 
 export interface ChatArtifactGcDeps {
-  db: Database.Database;
+  db: SqlDatabase;
   blobs: ChatArtifactBlobStore;
   /** How long an unreferenced snapshot row is kept. Default 24h. */
   snapshotGraceMs?: number;

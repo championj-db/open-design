@@ -13,7 +13,7 @@
 //     reproducibility wins over freshness.
 
 import { randomUUID } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { readPluginEnvKnobs } from '../app-config.js';
 import {
   OPEN_DESIGN_PLUGIN_SPEC_VERSION,
@@ -30,7 +30,7 @@ import {
 } from '@open-design/contracts';
 import { strategyPackageHashFromDigests } from '@open-design/plugin-runtime';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type DbRow = Record<string, unknown>;
 
 export interface CreateSnapshotInput {
@@ -297,8 +297,8 @@ export function pruneExpiredSnapshots(
   // durable task references when the additive task table is present so one
   // protected row cannot make a mixed GC batch fail its foreign-key delete.
   const hasStrategyTaskStore = Boolean(db.prepare(`
-    SELECT 1 FROM sqlite_master
-     WHERE type = 'table' AND name = 'strategy_task_executions'
+    SELECT 1 FROM information_schema.tables
+     WHERE table_schema = current_schema() AND table_name = 'strategy_task_executions'
   `).get());
   const excludeStrategyTaskSnapshot = hasStrategyTaskStore
     ? `AND NOT EXISTS (

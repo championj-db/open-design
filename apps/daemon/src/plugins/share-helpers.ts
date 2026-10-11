@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import { PLUGIN_SHARE_ACTION_PLUGIN_IDS } from '@open-design/contracts';
 import { upsertMessage } from '../db.js';
 import { emittedRenderableQuestionForm } from '../question-form-detect.js';
@@ -65,7 +65,7 @@ export interface SkillPluginCandidateInput {
 }
 
 export interface PluginSnapshotReader {
-  (db: Database.Database, snapshotId: string): { pluginId?: string | null } | null | undefined;
+  (db: SqlDatabase, snapshotId: string): { pluginId?: string | null } | null | undefined;
 }
 
 export function renderPluginBriefTemplate(
@@ -259,7 +259,7 @@ export async function ensureGhReady(): Promise<
 }
 
 export function reconcileAssistantMessageOnRunEnd(
-  db: Database.Database,
+  db: SqlDatabase,
   runs: RunWaiter,
   run: RunLike,
 ): void {
@@ -293,7 +293,7 @@ export function reconcileAssistantMessageOnRunEnd(
 }
 
 export function isPluginAuthoringRun(
-  db: Database.Database,
+  db: SqlDatabase,
   run: RunLike | null | undefined,
   getSnapshot: PluginSnapshotReader,
 ): boolean {
@@ -323,7 +323,7 @@ export async function hasGeneratedPluginArtifacts(projectRoot: string | null | u
 }
 
 function assistantMessageEmittedQuestionForm(
-  db: Database.Database,
+  db: SqlDatabase,
   assistantMessageId: string | null | undefined,
 ): boolean {
   if (!assistantMessageId) return false;
@@ -332,7 +332,7 @@ function assistantMessageEmittedQuestionForm(
 }
 
 function deferredSkillPluginCandidateForRun(
-  db: Database.Database,
+  db: SqlDatabase,
   run: RunLike,
 ): SkillPluginCandidateLike | null {
   if (!run.projectId || !run.conversationId) return null;
@@ -345,7 +345,7 @@ function deferredSkillPluginCandidateForRun(
 }
 
 export function detectSkillPluginCandidateOnRunSuccess(
-  db: Database.Database,
+  db: SqlDatabase,
   runs: RunWaiter,
   run: RunLike,
   input: SkillPluginCandidateInput | null | undefined,
@@ -381,7 +381,7 @@ export function detectSkillPluginCandidateOnRunSuccess(
 }
 
 export function upsertSkillPluginCandidateAssistantMessage(
-  db: Database.Database,
+  db: SqlDatabase,
   run: RunLike,
   candidate: SkillPluginCandidateLike,
 ): string | null {

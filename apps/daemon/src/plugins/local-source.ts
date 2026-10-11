@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { InstalledPluginRecord } from '@open-design/contracts';
 import {
   readTeamResourceMaterialization,
@@ -57,7 +57,7 @@ export function localPluginRegistryScope(
  * install/share/sync/move operations enforce their own current authority.
  */
 export async function resolveLocalPluginBySource(input: {
-  db: Database.Database;
+  db: SqlDatabase;
   id: string;
   source: string;
   userPluginsRoot: string;

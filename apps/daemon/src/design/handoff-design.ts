@@ -21,7 +21,7 @@
 // (matching `finalize-design.ts`'s BYOK posture). The daemon does NOT
 // store provider credentials.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type {
   HandoffRequest,
   HandoffResponse,
@@ -139,7 +139,7 @@ export function buildHandoffPrompt(input: HandoffPromptInput): HandoffPromptOutp
   return { systemPrompt: HANDOFF_SYSTEM_PROMPT, userPrompt };
 }
 
-type Db = Database.Database;
+type Db = SqlDatabase;
 
 /**
  * Run the full handoff synthesis pipeline:

@@ -1,9 +1,9 @@
 import type { Express, Request } from 'express';
-import type * as BetterSqlite3 from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 
 type MarketplaceTrust = 'trusted' | 'restricted' | 'official';
 
-type SqliteDbLike = BetterSqlite3.Database;
+type SqliteDbLike = SqlDatabase;
 
 interface MarketplaceManifest {
   plugins?: unknown[];

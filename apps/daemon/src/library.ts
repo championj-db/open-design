@@ -12,7 +12,7 @@
 // slice: the recorded enrichment task marks those stages `skipped` so the UI
 // can later offer a reindex once a model is configured.
 
-import type Database from 'better-sqlite3';
+import { PG_UNIQUE_VIOLATION, type SqlDatabase } from './storage/postgres/sql-database.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,7 +31,7 @@ import {
   type LibraryAssetRecord,
 } from './library-store.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export function libraryObjectsDir(libraryDir: string): string {
   return path.join(libraryDir, 'objects');
@@ -306,14 +306,10 @@ function dedupIntoExistingAsset(
 /** True when `err` is the UNIQUE(content_hash) constraint firing on insert. */
 function isUniqueContentHashViolation(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
-  const code = (err as { code?: unknown }).code;
-  const message = (err as { message?: unknown }).message;
-  return (
-    code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-    (typeof message === 'string' &&
-      message.includes('UNIQUE constraint failed') &&
-      message.includes('content_hash'))
-  );
+  const { code, constraint, message } = err as { code?: unknown; constraint?: unknown; message?: unknown };
+  if (code !== PG_UNIQUE_VIOLATION) return false;
+  return (typeof constraint === 'string' && constraint.includes('content_hash'))
+    || (typeof message === 'string' && message.includes('content_hash'));
 }
 
 /**

@@ -13,7 +13,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { WorkspaceCollabContext } from '@open-design/contracts';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
+
 import express from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -169,11 +170,10 @@ afterEach(async () => {
   server = undefined;
 
   // Best-effort cleanup of the plugin row + snapshot rows we created.
-  // The user's real `.od/app.sqlite` is what the daemon talks to, so we
+  // The daemon's data-dir database is what it talks to, so we
   // strip our PLUGIN_ID rows after each test to avoid polluting it.
   try {
-    const dbPath = path.join(serverRuntimeDataRoot, 'app.sqlite');
-    const db = new Database(dbPath);
+    const db = openDataDirDatabase(serverRuntimeDataRoot);
     db.prepare('DELETE FROM applied_plugin_snapshots WHERE plugin_id = ?').run(PLUGIN_ID);
     db.prepare('DELETE FROM installed_plugins WHERE id = ?').run(PLUGIN_ID);
     for (const projectId of cleanupRows) {
@@ -221,8 +221,7 @@ describe('GET /api/runs/:runId/genui/:surfaceId enriches with snapshot spec', ()
     // Insert a genui_surfaces row directly (no agent process runs in the
     // fixture), then expose that synthetic run through the same in-memory
     // registry contract the production route authorizes before reading rows.
-    const dbPath = path.join(serverRuntimeDataRoot, 'app.sqlite');
-    const db = new Database(dbPath);
+    const db = openDataDirDatabase(serverRuntimeDataRoot);
     const runId = `run-phase2a5-${Date.now()}`;
     const surfaceRowId = `srf-phase2a5-${Date.now()}`;
     ensureWorkspaceProject(db, {

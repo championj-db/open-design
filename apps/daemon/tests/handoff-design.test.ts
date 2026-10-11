@@ -348,7 +348,9 @@ describe('synthesizeHandoffPrompt (pipeline)', () => {
     expect(userMessage.length).toBeLessThan(400 * 1024);
     expect(userMessage).toContain('"kind":"truncated"');
     expect(result.transcriptMessageCount).toBe(5_000);
-  });
+    // Seeding 5,000 messages is ~25k Postgres round trips (each upsertMessage
+    // issues several statements), far slower than the old in-process SQLite.
+  }, 120_000);
 
   it('scopes the synthesized transcript to the requested conversation, not the whole project', async () => {
     const { db, projectsRoot } = setupProjectFixture();

@@ -447,7 +447,8 @@ describe('persisted strategy verdict in conversation history', () => {
   it.each([
     { label: 'legacy missing attribution', reasons: null, text: null, expectedText: null },
     { label: 'malformed reason JSON', reasons: '{broken', text: REPLY, expectedText: REPLY },
-    { label: 'non-text attribution', reasons: '{broken', text: Buffer.from('invalid'), expectedText: null },
+    // (A non-text value in blocked_visible_text was a SQLite dynamic-typing
+    // case; the Postgres column is TEXT, so it cannot be stored.)
   ])('keeps history readable with $label', async ({ reasons, text, expectedText }) => {
     seedTaskAndMessage(db, 'blocked');
     // Corrupt only existing optional storage columns after using the real

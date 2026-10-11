@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { Express, RequestHandler } from 'express';
 import { readCurrentAppVersionInfo } from '../app-version.js';
 import { getCritiqueMetrics, register } from '../metrics/index.js';
@@ -63,8 +62,7 @@ export function registerDaemonRoutes(app: Express, deps: RegisterDaemonRoutesDep
   app.get('/api/daemon/db', async (_req, res) => {
     try {
       const { inspectSqliteDatabase } = await import('../storage/db-inspect.js');
-      const file = path.join(paths.RUNTIME_DATA_DIR, 'app.sqlite');
-      const report = await inspectSqliteDatabase({ db, file });
+      const report = await inspectSqliteDatabase({ db });
       res.json(report);
     } catch (err) {
       res.status(500).json({ error: String(err) });
@@ -135,12 +133,11 @@ export function registerDaemonRoutes(app: Express, deps: RegisterDaemonRoutesDep
   app.post('/api/daemon/db/vacuum', requireLocalDaemonRequest, async (_req, res) => {
     try {
       const { inspectSqliteDatabase } = await import('../storage/db-inspect.js');
-      const file = path.join(paths.RUNTIME_DATA_DIR, 'app.sqlite');
-      const before = await inspectSqliteDatabase({ db, file });
+      const before = await inspectSqliteDatabase({ db });
       const startedAt = Date.now();
       db.exec('VACUUM');
       const elapsedMs = Date.now() - startedAt;
-      const after = await inspectSqliteDatabase({ db, file });
+      const after = await inspectSqliteDatabase({ db });
       res.json({
         ok: true,
         beforeBytes: before.sizeBytes,

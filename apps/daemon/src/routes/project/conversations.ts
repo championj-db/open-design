@@ -245,7 +245,7 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
      * 哪些标题,而那份名单只有这里是权威的 —— 客户端手上的是可能过期的快照,
      * 两个客户端各算各的必然撞号。
      *
-     * 「读名单 → 算号 → 落库」这三步中间**一个 await 都没有**,better-sqlite3 又是
+     * 「读名单 → 算号 → 落库」这三步中间**一个 await 都没有**,数据库句柄又是
      * 同步的,所以同进程内它就是原子的:同一秒连点两下拿到的是 (1) 和 (2)。
      * 在这中间插入任何异步调用都会把这个性质弄没。
      *

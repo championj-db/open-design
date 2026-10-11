@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { holdTableLock, openDataDirDatabase } from '../helpers/test-db.js';
 
 import { closeDatabase, openDatabase } from '../../src/db.js';
 import {
@@ -19,6 +19,7 @@ const createRuns = (options: Record<string, unknown>): any =>
 let tempDir: string | null = null;
 
 afterEach(() => {
+  delete process.env.OD_PG_LOCK_TIMEOUT_MS;
   vi.useRealTimers();
   closeDatabase();
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
@@ -28,6 +29,7 @@ afterEach(() => {
 
 function fixture(now = 1_800_000_000_000) {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-terminal-delivery-'));
+  process.env.OD_PG_LOCK_TIMEOUT_MS = '50';
   const db = openDatabase(tempDir);
   return { db, store: createAmrTerminalReportOutboxStore(db, () => now), now };
 }
@@ -44,12 +46,12 @@ describe('AMR terminal report delivery', () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-terminal-delivery-'));
     const dataDir = path.join(tempDir, '.od');
     fs.mkdirSync(dataDir, { recursive: true });
-    const legacy = new Database(path.join(dataDir, 'app.sqlite'));
+    const legacy = openDataDirDatabase(dataDir);
     legacy.exec(`
       CREATE TABLE amr_terminal_report_outbox (
         run_id TEXT PRIMARY KEY,
         outcome TEXT NOT NULL CHECK (outcome IN ('failed', 'canceled')),
-        terminal_at INTEGER NOT NULL
+        terminal_at BIGINT NOT NULL
       )
     `);
     legacy.prepare(`
@@ -98,9 +100,7 @@ describe('AMR terminal report delivery', () => {
     const service = createAmrTerminalReportDeliveryService({
       store, run, now: () => now, pollIntervalMs: 1_000,
     });
-    db.pragma('busy_timeout = 0');
-    const blocker = new Database(db.name);
-    blocker.exec('BEGIN IMMEDIATE');
+    const blocker = holdTableLock(path.join(tempDir!, '.od'), 'amr_terminal_report_outbox');
     try {
       service.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -133,9 +133,7 @@ describe('AMR terminal report delivery', () => {
     service.start();
     await vi.advanceTimersByTimeAsync(0);
     store.enqueue({ runId: 'timed-claim-storage-run', outcome: 'failed', terminalAt: now });
-    db.pragma('busy_timeout = 0');
-    const blocker = new Database(db.name);
-    blocker.exec('BEGIN IMMEDIATE');
+    const blocker = holdTableLock(path.join(tempDir!, '.od'), 'amr_terminal_report_outbox');
     try {
       await vi.advanceTimersByTimeAsync(1_000);
       expect(run).not.toHaveBeenCalled();
@@ -174,9 +172,7 @@ describe('AMR terminal report delivery', () => {
     const processing = service.processDue();
     await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
 
-    db.pragma('busy_timeout = 0');
-    const blocker = new Database(db.name);
-    blocker.exec('BEGIN IMMEDIATE');
+    const blocker = holdTableLock(path.join(tempDir!, '.od'), 'amr_terminal_report_outbox');
     try {
       const firstArgs = run.mock.calls[0]?.[0] as string[];
       releaseFirstReceipt(JSON.stringify({

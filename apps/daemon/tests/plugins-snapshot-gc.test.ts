@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import {
   createSnapshot,
@@ -20,12 +21,12 @@ import {
   pruneExpiredSnapshots,
 } from '../src/plugins/snapshots.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), 'od-gc-'));
-  db = new Database(path.join(tmpDir, 'test.sqlite'));
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);
@@ -38,6 +39,23 @@ afterEach(async () => {
   db.close();
   await rm(tmpDir, { recursive: true, force: true });
 });
+
+// Delete a project row without the applied_plugin_snapshots FK cascade
+// beating the GC sweep to it (the SQLite version toggled
+// `PRAGMA foreign_keys = OFF` around the DELETE; Postgres always enforces
+// FKs, so drop the snapshot -> projects constraint on this throwaway schema).
+function deleteProjectWithoutCascade(handle: SqlDatabase, projectId: string): void {
+  const constraints = handle.prepare(
+    `SELECT conname FROM pg_constraint
+      WHERE contype = 'f'
+        AND conrelid = 'applied_plugin_snapshots'::regclass
+        AND confrelid = 'projects'::regclass`,
+  ).all() as Array<{ conname: string }>;
+  for (const { conname } of constraints) {
+    handle.exec(`ALTER TABLE applied_plugin_snapshots DROP CONSTRAINT "${conname}"`);
+  }
+  handle.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+}
 
 const baseInput = (extra = {}) => ({
   projectId: 'project-1',
@@ -138,14 +156,12 @@ describe('snapshot GC', () => {
       // matches the no-longer-exists condition. Disable foreign-key
       // enforcement around the DELETE so the FK cascade doesn't beat
       // the GC sweep to it (the daemon's real openDb path has
-      // foreign_keys=ON; the in-memory test DB defaults to OFF, but
-      // we set it explicitly to keep the test readable).
+      // foreign_keys=ON; Postgres always enforces them, so the helper
+      // drops the FK on this throwaway schema).
       const oldEnough = Date.now() - 90 * 24 * 60 * 60 * 1000;
       db.prepare('UPDATE applied_plugin_snapshots SET applied_at = ? WHERE id = ?')
         .run(oldEnough, referenced.snapshotId);
-      db.pragma('foreign_keys = OFF');
-      db.prepare('DELETE FROM projects WHERE id = ?').run('project-1');
-      db.pragma('foreign_keys = ON');
+      deleteProjectWithoutCascade(db, 'project-1');
       const result = pruneExpiredSnapshots(db, { retentionDays: 30 });
       expect(result.ids).toContain(referenced.snapshotId);
       expect(getSnapshot(db, referenced.snapshotId)).toBeNull();
@@ -165,9 +181,7 @@ describe('snapshot GC', () => {
     it('respects the retentionDays window — recent rows survive even on a deleted project', () => {
       const referenced = createSnapshot(db, baseInput());
       linkSnapshotToRun(db, referenced.snapshotId, 'run-r');
-      db.pragma('foreign_keys = OFF');
-      db.prepare('DELETE FROM projects WHERE id = ?').run('project-1');
-      db.pragma('foreign_keys = ON');
+      deleteProjectWithoutCascade(db, 'project-1');
       // applied_at is now (well within retentionDays); the project
       // is gone but the row is still recent enough to keep.
       const result = pruneExpiredSnapshots(db, { retentionDays: 30 });

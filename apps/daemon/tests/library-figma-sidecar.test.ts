@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 
 import { migrateLibrary } from '../src/library-store.js';
 import {
@@ -18,11 +19,11 @@ import {
   writeFigmaSidecar,
 } from '../src/library.js';
 
-let db: Database.Database;
+let db: SqlDatabase;
 let libraryDir: string;
 
 beforeEach(async () => {
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   migrateLibrary(db);
   libraryDir = await mkdtemp(path.join(os.tmpdir(), 'od-library-figma-'));
 });

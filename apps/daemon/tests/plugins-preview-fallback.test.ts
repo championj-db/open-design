@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startServer } from '../src/server.js';
@@ -106,8 +106,7 @@ afterEach(async () => {
   });
   server = undefined;
   try {
-    const dbPath = path.join(serverRuntimeDataRoot, 'app.sqlite');
-    const db = new Database(dbPath);
+    const db = openDataDirDatabase(serverRuntimeDataRoot);
     db.prepare('DELETE FROM installed_plugins WHERE id = ?').run(PLUGIN_ID);
     db.close();
   } catch {

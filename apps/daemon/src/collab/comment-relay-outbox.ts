@@ -7,10 +7,10 @@
 // is part of the row key: a later login or Workspace switch can never retarget
 // an old delivery to another Team or silently fall back to Personal.
 
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { CollabCloudComment } from '@open-design/contracts';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface CommentRelayOutboxIdentity {
   workspaceId: string;
@@ -66,24 +66,24 @@ export function commentRelayLocalBindingMatches(
 export function migrateCommentRelayOutbox(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS comment_relay_outbox (
-      workspace_id TEXT NOT NULL,
-      workspace_member_id TEXT NOT NULL,
-      team_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      comment_id TEXT NOT NULL,
-      expected_owner_member_id TEXT,
-      payload_json TEXT NOT NULL,
-      revision INTEGER NOT NULL DEFAULT 1,
-      attempt_count INTEGER NOT NULL DEFAULT 0,
-      next_attempt_at INTEGER NOT NULL,
-      last_error TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      workspace_id TEXT COLLATE "C" NOT NULL,
+      workspace_member_id TEXT COLLATE "C" NOT NULL,
+      team_id TEXT COLLATE "C" NOT NULL,
+      project_id TEXT COLLATE "C" NOT NULL,
+      comment_id TEXT COLLATE "C" NOT NULL,
+      expected_owner_member_id TEXT COLLATE "C",
+      payload_json TEXT COLLATE "C" NOT NULL,
+      revision BIGINT NOT NULL DEFAULT 1,
+      attempt_count BIGINT NOT NULL DEFAULT 0,
+      next_attempt_at BIGINT NOT NULL,
+      last_error TEXT COLLATE "C",
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (workspace_id, workspace_member_id, project_id, comment_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_comment_relay_outbox_due
-      ON comment_relay_outbox(next_attempt_at, updated_at);
+      ON comment_relay_outbox(next_attempt_at NULLS FIRST, updated_at NULLS FIRST);
   `);
 }
 

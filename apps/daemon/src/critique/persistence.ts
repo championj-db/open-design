@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import {
   CRITIQUE_RUN_STATUSES,
   type CritiquePersistedStatus,
@@ -120,7 +120,7 @@ function parseRoundsPayload(json: string): { rounds: CritiqueRoundSummary[]; rec
   }
 }
 
-// Raw row shape as returned by better-sqlite3 (snake_case column aliases).
+// Raw row shape as returned by the database handle (snake_case column aliases).
 interface RawCritiqueRunRow {
   id: string;
   projectId: string;
@@ -171,35 +171,35 @@ const COLS = `
  * they don't exist. Safe to call from the existing migrate(db) flow on every
  * daemon boot.
  */
-export function migrateCritique(db: Database.Database): void {
+export function migrateCritique(db: SqlDatabase): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS critique_runs (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      conversation_id TEXT,
-      artifact_path TEXT,
-      status TEXT NOT NULL CHECK (status IN
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      conversation_id TEXT COLLATE "C",
+      artifact_path TEXT COLLATE "C",
+      status TEXT COLLATE "C" NOT NULL CHECK (status IN
         ('shipped','below_threshold','timed_out','interrupted','degraded','failed','legacy','running')),
-      score REAL,
-      rounds_json TEXT NOT NULL DEFAULT '[]',
-      transcript_path TEXT,
-      protocol_version INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      score DOUBLE PRECISION,
+      rounds_json TEXT COLLATE "C" NOT NULL DEFAULT '[]',
+      transcript_path TEXT COLLATE "C",
+      protocol_version BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_critique_runs_project
-      ON critique_runs(project_id, updated_at DESC);
+      ON critique_runs(project_id NULLS FIRST, updated_at DESC NULLS LAST);
 
     CREATE INDEX IF NOT EXISTS idx_critique_runs_status
-      ON critique_runs(status);
+      ON critique_runs(status NULLS FIRST);
   `);
 }
 
 export function insertCritiqueRun(
-  db: Database.Database,
+  db: SqlDatabase,
   input: CritiqueRunInsert,
 ): CritiqueRunRow {
   if (!ALL_VALID_STATUSES.has(input.status)) {
@@ -235,7 +235,7 @@ export function insertCritiqueRun(
 }
 
 export function getCritiqueRun(
-  db: Database.Database,
+  db: SqlDatabase,
   id: string,
 ): CritiqueRunRow | null {
   const raw = db
@@ -249,7 +249,7 @@ export function getCritiqueRun(
  * when the id does not exist. Always updates updated_at.
  */
 export function updateCritiqueRun(
-  db: Database.Database,
+  db: SqlDatabase,
   id: string,
   patch: CritiqueRunPatch,
 ): CritiqueRunRow | null {
@@ -293,7 +293,7 @@ export function updateCritiqueRun(
 }
 
 export function listCritiqueRunsByProject(
-  db: Database.Database,
+  db: SqlDatabase,
   projectId: string,
 ): CritiqueRunRow[] {
   const rows = db
@@ -307,7 +307,7 @@ export function listCritiqueRunsByProject(
   return rows.map(normalizeRow);
 }
 
-export function deleteCritiqueRun(db: Database.Database, id: string): void {
+export function deleteCritiqueRun(db: SqlDatabase, id: string): void {
   db.prepare(`DELETE FROM critique_runs WHERE id = ?`).run(id);
 }
 
@@ -325,7 +325,7 @@ export function deleteCritiqueRun(db: Database.Database, id: string): void {
  * not in 'running' status.
  */
 export function markRunInterruptedRecovery(
-  db: Database.Database,
+  db: SqlDatabase,
   id: string,
   recoveryReason: string,
   now: number = Date.now(),
@@ -354,7 +354,7 @@ export function markRunInterruptedRecovery(
  * = 'daemon_restart'. Returns the count of rows mutated.
  */
 export function reconcileStaleRuns(
-  db: Database.Database,
+  db: SqlDatabase,
   options: { staleAfterMs: number; now?: number },
 ): number {
   const now = options.now ?? Date.now();

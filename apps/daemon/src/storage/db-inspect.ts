@@ -1,23 +1,21 @@
 // Phase 5 / spec §15.6 / plan §3.GG1 — daemon-DB inspection helper.
 //
-// Pure helper that walks a SQLite db file + schema and returns a
-// structured inventory: file size, table list, per-table row count,
-// schema version (the user_version PRAGMA we already use for
-// migrations).
+// Pure helper that walks the daemon's Postgres schema and returns a
+// structured inventory: on-disk size, table list, per-table row count,
+// schema version (the number of applied migrations).
 //
 // Used by:
 //   - `od daemon db status` (CLI ops sanity check),
-//   - the `od doctor` aggregator (a future patch can fold the
-//     summary in without re-implementing the SQLite read).
+//   - the `od doctor` aggregator.
 //
-// Pure relative to its inputs: callers pass the SQLite handle +
-// the on-disk file path. The function never opens a new
-// connection or mutates state.
+// Pure relative to its inputs: callers pass the open handle. The function
+// never opens a new connection or mutates state. The historical `file`
+// input (the SQLite path) is accepted and ignored.
 
-import { promises as fsp, statSync } from 'node:fs';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from './postgres/sql-database.js';
+import { appliedMigrationIds } from './postgres/migrations.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface DaemonDbTableInfo {
   name:      string;
@@ -26,36 +24,49 @@ export interface DaemonDbTableInfo {
 
 export interface DaemonDbStatusReport {
   kind:           'sqlite' | 'postgres';
-  // Absolute path on disk (sqlite); connection identifier
-  // (postgres). For the postgres stub we surface 'host:port/db'.
+  // Connection identifier ('postgres host:port/db as user', no secrets).
   location:       string;
-  // Total bytes the DB file occupies. Sums sqlite + sqlite-wal +
-  // sqlite-shm so the report matches `du -h` rather than just the
-  // primary file.
+  // Total bytes the daemon schema's tables + indexes + TOAST occupy.
   sizeBytes:      number;
   schemaVersion:  number | null;
   tables:         DaemonDbTableInfo[];
   generatedAt:    number;
 }
 
-const SYSTEM_TABLE_PREFIXES = ['sqlite_', 'better_sqlite3_'];
+const SYSTEM_TABLE_PREFIXES = ['od_schema_migrations'];
 
 function isSystemTable(name: string): boolean {
   return SYSTEM_TABLE_PREFIXES.some((p) => name.startsWith(p));
 }
 
+const SCHEMA_TABLES_SQL = `
+  SELECT c.relname AS name
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
+   ORDER BY c.relname`;
+
+function schemaSizeBytes(db: SqliteDb): number | null {
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(pg_total_relation_size(c.oid)), 0) AS bytes
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
+  `).get() as { bytes: number } | undefined;
+  const bytes = Number(row?.bytes);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 export async function inspectSqliteDatabase(input: {
   db: SqliteDb;
-  file: string;
+  file?: string;
 }): Promise<DaemonDbStatusReport> {
-  const { db, file } = input;
+  const { db } = input;
 
-  // 1. Schema version (user_version pragma).
+  // 1. Schema version (applied migration count).
   let schemaVersion: number | null = null;
   try {
-    const v = db.pragma('user_version', { simple: true });
-    schemaVersion = typeof v === 'number' ? v : Number(v);
-    if (!Number.isFinite(schemaVersion)) schemaVersion = null;
+    schemaVersion = appliedMigrationIds(db).length;
   } catch {
     schemaVersion = null;
   }
@@ -63,9 +74,7 @@ export async function inspectSqliteDatabase(input: {
   // 2. Table list with row counts.
   const tables: DaemonDbTableInfo[] = [];
   try {
-    const names = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
-      .all() as Array<{ name: string }>;
+    const names = db.prepare(SCHEMA_TABLES_SQL).all() as Array<{ name: string }>;
     for (const { name } of names) {
       if (isSystemTable(name)) continue;
       try {
@@ -74,7 +83,7 @@ export async function inspectSqliteDatabase(input: {
         const row = db.prepare(`SELECT count(*) AS c FROM "${safe}"`).get() as { c: number } | undefined;
         tables.push({ name: safe, rowCount: row?.c ?? 0 });
       } catch {
-        // A malformed view / corrupted table shouldn't fail the
+        // A malformed view / unreadable table shouldn't fail the
         // whole report; record 0 rows.
         tables.push({ name, rowCount: 0 });
       }
@@ -84,12 +93,16 @@ export async function inspectSqliteDatabase(input: {
     // caller (CLI shows 0 tables, which is itself a useful signal).
   }
 
-  // 3. File size = primary + -wal + -shm so the number matches du.
-  const sizeBytes = await sumFileSizes([file, `${file}-wal`, `${file}-shm`]);
+  let sizeBytes = 0;
+  try {
+    sizeBytes = schemaSizeBytes(db) ?? 0;
+  } catch {
+    sizeBytes = 0;
+  }
 
   return {
-    kind:          'sqlite',
-    location:      file,
+    kind:          'postgres',
+    location:      db.name,
     sizeBytes,
     schemaVersion,
     tables,
@@ -101,77 +114,57 @@ export interface SqlitePageStats {
   pageSize:      number | null;
   pageCount:     number | null;
   freelistCount: number | null;
-  // Separate from sizeBytes above: WAL growth (checkpoint starvation) and
-  // main-file growth mean different things for storage diagnosis.
+  // Separate from sizeBytes above: WAL growth and main-file growth mean
+  // different things for storage diagnosis. On Postgres the WAL is the
+  // server's, not the daemon's, so walBytes is always null.
   mainBytes:     number | null;
   walBytes:      number | null;
 }
 
 /**
- * Constant-cost storage snapshot for observability: three header-level
- * pragmas plus two stats. Never scans a table (no count(*), no dbstat), so it
- * is safe to call on startup and under memory pressure. Every field that
- * cannot be read is null, never 0.
+ * Cheap storage snapshot for observability: catalog reads only (block size
+ * and relation sizes), never a table scan, so it is safe to call on startup
+ * and under memory pressure. Every field that cannot be read is null, never 0.
  */
-export function readSqlitePageStats(input: { db: SqliteDb; file: string }): SqlitePageStats {
-  const { db, file } = input;
+export function readSqlitePageStats(input: { db: SqliteDb; file?: string }): SqlitePageStats {
+  const { db } = input;
+  let pageSize: number | null = null;
+  let mainBytes: number | null = null;
+  try {
+    const row = db.prepare(`SELECT current_setting('block_size')::bigint AS size`).get() as { size: number } | undefined;
+    const value = Number(row?.size);
+    pageSize = Number.isSafeInteger(value) && value > 0 ? value : null;
+  } catch {
+    pageSize = null;
+  }
+  try {
+    mainBytes = schemaSizeBytes(db);
+  } catch {
+    mainBytes = null;
+  }
   return {
-    pageSize:      readIntegerPragma(db, 'page_size'),
-    pageCount:     readIntegerPragma(db, 'page_count'),
-    freelistCount: readIntegerPragma(db, 'freelist_count'),
-    mainBytes:     statFileSizeSync(file),
-    walBytes:      statFileSizeSync(`${file}-wal`),
+    pageSize,
+    pageCount:     pageSize && mainBytes != null ? Math.ceil(mainBytes / pageSize) : null,
+    freelistCount: null,
+    mainBytes,
+    walBytes:      null,
   };
 }
 
-function readIntegerPragma(db: SqliteDb, name: 'page_size' | 'page_count' | 'freelist_count'): number | null {
-  try {
-    const value = Number(db.pragma(name, { simple: true }));
-    return Number.isSafeInteger(value) && value >= 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function statFileSizeSync(path: string): number | null {
-  try {
-    return statSync(path).size;
-  } catch {
-    return null;
-  }
-}
-
-async function sumFileSizes(paths: ReadonlyArray<string>): Promise<number> {
-  let total = 0;
-  for (const p of paths) {
-    try {
-      const stat = await fsp.stat(p);
-      total += stat.size;
-    } catch {
-      // missing -wal / -shm is normal when the DB hasn't been written
-      // since open.
-    }
-  }
-  return total;
-}
-
 function sanitizeTableName(name: string): string | null {
-  // Allow ASCII alphanumerics + underscore; SQLite identifier sanity
-  // check. Prevents accidental SQL injection if a malicious migration
-  // ever invents a hostile table name.
+  // Allow ASCII alphanumerics + underscore; identifier sanity check.
+  // Prevents accidental SQL injection if a malicious migration ever
+  // invents a hostile table name.
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
   return name;
 }
 
 // Plan §3.LL1 — daemon-DB integrity check.
 //
-// Wraps SQLite's PRAGMA integrity_check + foreign_key_check + the
-// fast PRAGMA quick_check variant. Returns a structured report so
-// the CLI can pretty-print + a CI tool can parse JSON.
-//
-// PRAGMA integrity_check returns either ['ok'] when the DB is
-// healthy or one row per issue. PRAGMA foreign_key_check returns
-// rows for each FK violation; we surface them as 'fk' issues.
+// Postgres keeps its own page-level integrity, so the check here is about
+// the daemon's schema: the connection answers, and no foreign key or check
+// constraint is left NOT VALID (rows that bypassed the constraint). Both
+// modes run the same checks; 'quick_check' is kept for CLI compatibility.
 
 export type DbIntegrityIssueKind = 'integrity' | 'foreign_key';
 
@@ -200,38 +193,35 @@ export function verifySqliteIntegrity(opts: VerifyDbOptions): DbIntegrityReport 
   const startedAt = Date.now();
   const issues: DbIntegrityIssue[] = [];
 
-  // 1. integrity_check / quick_check.
-  const pragma = quick ? 'quick_check' : 'integrity_check';
+  // 1. The connection answers.
   try {
-    const rows = db.pragma(pragma) as Array<Record<string, unknown>>;
-    for (const row of rows) {
-      // SQLite returns the string under either `integrity_check`,
-      // `quick_check`, or just the first column. Normalise to the
-      // first string-valued field.
-      const message = (row[pragma] ?? Object.values(row)[0]) as unknown;
-      if (typeof message !== 'string') continue;
-      if (message.toLowerCase() === 'ok') continue;
-      issues.push({ kind: 'integrity', message });
-    }
+    db.prepare('SELECT 1 AS ok').get();
   } catch (err) {
-    issues.push({ kind: 'integrity', message: `pragma ${pragma} threw: ${(err as Error).message}` });
+    issues.push({ kind: 'integrity', message: `connection check threw: ${(err as Error).message}` });
   }
 
-  // 2. foreign_key_check.
+  // 2. Unvalidated constraints.
   try {
-    const rows = db.pragma('foreign_key_check') as Array<{ table?: string; rowid?: number; parent?: string; fkid?: number }>;
+    const rows = db.prepare(`
+      SELECT con.conname AS name, rel.relname AS "table", con.contype AS type,
+             ref.relname AS parent
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = rel.relnamespace
+        LEFT JOIN pg_class ref ON ref.oid = con.confrelid
+       WHERE n.nspname = current_schema() AND NOT con.convalidated
+       ORDER BY rel.relname, con.conname
+    `).all() as Array<{ name: string; table: string; type: string; parent: string | null }>;
     for (const row of rows) {
-      const tbl = row.table ?? '?';
-      const parent = row.parent ?? '?';
-      const fkid = row.fkid ?? '?';
-      const rowid = row.rowid ?? '?';
-      issues.push({
-        kind: 'foreign_key',
-        message: `FK violation in ${tbl} (rowid=${rowid}) referencing ${parent} (fkid=${fkid})`,
-      });
+      issues.push(row.type === 'f'
+        ? {
+            kind: 'foreign_key',
+            message: `FK ${row.name} in ${row.table} referencing ${row.parent ?? '?'} is NOT VALID`,
+          }
+        : { kind: 'integrity', message: `constraint ${row.name} on ${row.table} is NOT VALID` });
     }
   } catch (err) {
-    issues.push({ kind: 'foreign_key', message: `pragma foreign_key_check threw: ${(err as Error).message}` });
+    issues.push({ kind: 'foreign_key', message: `constraint check threw: ${(err as Error).message}` });
   }
 
   return {

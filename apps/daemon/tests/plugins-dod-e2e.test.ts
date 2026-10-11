@@ -25,7 +25,8 @@ import { mkdtemp, rm, writeFile, mkdir, readdir, stat, readFile } from 'node:fs/
 import os from 'node:os';
 import path from 'node:path';
 import url from 'node:url';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { migratePlugins } from '../src/plugins/persistence.js';
 import { applyPlugin } from '../src/plugins/apply.js';
 import { installFromLocalFolder } from '../src/plugins/installer.js';
@@ -39,7 +40,7 @@ import { FIRST_PARTY_ATOMS, type AtomCatalogEntry } from '../src/plugins/atoms.j
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'plugin-fixtures', 'sample-plugin');
 
-let db: Database.Database;
+let db: SqlDatabase;
 let tmpRoot: string;
 let pluginsRoot: string;
 let projectCwd: string;
@@ -80,12 +81,12 @@ beforeEach(async () => {
   pluginsRoot = path.join(tmpRoot, 'plugins');
   projectCwd = path.join(tmpRoot, 'project-cwd');
   await mkdir(projectCwd, { recursive: true });
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      metadata_json TEXT
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C",
+      metadata_json TEXT COLLATE "C"
     );
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);
   `);

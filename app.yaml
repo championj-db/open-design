@@ -16,3 +16,9 @@ env:
     value: "1"
   - name: NODE_ENV
     value: "production"
+  # Wave 2: Lakebase (Postgres). Attach the Lakebase database as an app
+  # resource so Databricks injects PGHOST / PGPORT / PGDATABASE / PGUSER /
+  # PGSSLMODE, then name the endpoint the OAuth DB credential is minted for.
+  # See docs/databricks-native/README.md ("Database").
+  # - name: LAKEBASE_ENDPOINT
+  #   value: "projects/<project>/branches/<branch>/endpoints/<endpoint>"

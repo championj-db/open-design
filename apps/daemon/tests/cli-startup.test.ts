@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
-import Database from 'better-sqlite3';
+import { openDataDirDatabase } from './helpers/test-db.js';
 import { describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
@@ -138,10 +138,9 @@ describe('CLI startup boundaries', () => {
 
     try {
       await waitForStdoutLine(first, /\[od\] listening on (http:\/\/[^\s]+)/u);
-      const db = new Database(join(dataDir, 'app.sqlite'));
+      const db = openDataDirDatabase(dataDir);
       try {
         const now = Date.now();
-        db.exec('PRAGMA foreign_keys = ON');
         db.prepare(
           `INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
         ).run(projectId, 'restart fixture', now, now);
@@ -190,7 +189,7 @@ describe('CLI startup boundaries', () => {
             status?: string;
             analyticsRecovery?: { completedAt?: number };
           };
-          const checkDb = new Database(join(dataDir, 'app.sqlite'), { readonly: true });
+          const checkDb = openDataDirDatabase(dataDir);
           try {
             const row = checkDb.prepare(`SELECT run_status AS status FROM messages WHERE id = ?`).get(messageId) as { status?: string } | undefined;
             return state.status === 'failed'

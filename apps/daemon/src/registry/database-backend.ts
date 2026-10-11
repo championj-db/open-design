@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { MarketplaceManifest, MarketplacePluginEntry } from '@open-design/contracts';
 import type {
   RegistryEntry,
@@ -9,7 +9,7 @@ import type {
 } from '@open-design/registry-protocol';
 import { StaticRegistryBackend, toRegistryEntry } from './static-backend.js';
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 
 export interface DatabaseRegistryBackendOptions {
   id: string;
@@ -75,11 +75,11 @@ export class DatabaseRegistryBackend extends StaticRegistryBackend {
 export function ensureRegistryTables(db: SqliteDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS registry_entries (
-      backend_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      version TEXT NOT NULL,
-      entry_json TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
+      backend_id TEXT COLLATE "C" NOT NULL,
+      name TEXT COLLATE "C" NOT NULL,
+      version TEXT COLLATE "C" NOT NULL,
+      entry_json TEXT COLLATE "C" NOT NULL,
+      updated_at BIGINT NOT NULL,
       PRIMARY KEY (backend_id, name)
     )
   `);

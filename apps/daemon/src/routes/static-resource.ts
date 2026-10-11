@@ -1,5 +1,5 @@
 import type { Express, Response } from 'express';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import type {
@@ -68,7 +68,7 @@ import type { RouteDeps } from '../server-context.js';
 import { findRealElementRange, HTML_TAG_PATTERNS } from '@open-design/contracts/runtime/html-injection-points';
 
 export interface RegisterAtomRoutesDeps {
-  db: Database.Database;
+  db: SqlDatabase;
   resources: { FIRST_PARTY_ATOMS: Array<{ id: string; taskKinds: string[]; [key: string]: unknown }> };
 }
 

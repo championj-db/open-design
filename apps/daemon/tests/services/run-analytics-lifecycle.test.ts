@@ -6,7 +6,7 @@
 // land as `cancelled`, not as a missing row, or the cancellation rate is
 // computed against a smaller denominator than the truth.
 
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -514,7 +514,7 @@ describe('run analytics lifecycle', () => {
 
 describe('run_finished storage observability', () => {
   it('adds storage fields to the emitted run_finished only, never to the recovery snapshot', async () => {
-    const db = new Database(':memory:');
+    const db = createTestDatabase({ migrate: false });
     db.exec(`CREATE TABLE messages (id TEXT PRIMARY KEY, content TEXT NOT NULL DEFAULT '', events_json TEXT);`);
     db.prepare(`INSERT INTO messages (id, content, events_json) VALUES ('assistant-1', 'done', '[]')`).run();
     try {

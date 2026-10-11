@@ -5,7 +5,8 @@ import path from 'node:path';
 import { strategyPackageHashFromDigests } from '@open-design/plugin-runtime';
 import { composeOdNextStrategyBundleHeadV2, serializeOdNextPromptBundleV2, StrategyTaskProjectionV2Schema } from '@open-design/contracts';
 import type { AppliedPluginSnapshot, OpenDesignPlanContractV2 } from '@open-design/contracts';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../../src/storage/postgres/sql-database.js';
+import { createAbortTrigger, dropRowTrigger, tableColumns } from '../../helpers/test-db.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDatabase, openDatabase, upsertMessage, getMessage } from '../../../src/db.js';
@@ -87,7 +88,7 @@ type TestFinalizeInput = Omit<FinalizeInput, 'repairRun'> & {
 };
 
 function finalizeStrategyPlanningTurn(
-  db: Database.Database,
+  db: SqlDatabase,
   input: TestFinalizeInput,
 ) {
   const task = getStrategyTaskExecution(db, input.taskExecutionId);
@@ -112,7 +113,7 @@ function finalizeStrategyPlanningTurn(
 
 type BeginProductionInput = Parameters<typeof beginAutomaticSimpleProductionRaw>[1];
 function beginAutomaticSimpleProduction(
-  db: Database.Database,
+  db: SqlDatabase,
   input: Omit<BeginProductionInput, 'finalText'> & { finalText?: string },
 ) {
   return beginAutomaticSimpleProductionRaw(db, {
@@ -157,7 +158,7 @@ function strategyBinding() {
   };
 }
 
-function createStrategySnapshot(db: Database.Database): AppliedPluginSnapshot {
+function createStrategySnapshot(db: SqlDatabase): AppliedPluginSnapshot {
   return createSnapshot(db, {
     projectId: 'project-1',
     conversationId: 'conversation-1',
@@ -290,7 +291,7 @@ const directEligible = {
 
 describe('OD Next planning coordinator', () => {
   let tempDir: string;
-  let db: Database.Database;
+  let db: SqlDatabase;
   let snapshot: AppliedPluginSnapshot;
   const startupSnapshots: OdNextTaskInputSnapshotDescriptor[] = [];
 
@@ -1661,9 +1662,9 @@ describe('OD Next planning coordinator', () => {
           executionIntent: produce ? 'produce' : 'plan_only',
         })).finish();
         if (entry === 'consume-verdict-rollback' || entry === 'resolved-produce-rollback') {
-          db.exec(produce
-            ? "CREATE TEMP TRIGGER reject_completed BEFORE INSERT ON strategy_task_runs WHEN NEW.input_stage = 'production' BEGIN SELECT RAISE(ABORT, 'fixture verdict write rejected'); END"
-            : "CREATE TEMP TRIGGER reject_completed BEFORE UPDATE ON strategy_task_executions WHEN NEW.outcome = 'completed' BEGIN SELECT RAISE(ABORT, 'fixture verdict write rejected'); END");
+          createAbortTrigger(db, produce
+            ? { name: 'reject_completed', event: 'BEFORE INSERT ON strategy_task_runs', condition: "NEW.input_stage = 'production'", message: 'fixture verdict write rejected' }
+            : { name: 'reject_completed', event: 'BEFORE UPDATE ON strategy_task_executions', condition: "NEW.outcome = 'completed'", message: 'fixture verdict write rejected' });
           expect(() => prepareAutomaticStrategyContinuation({
             db, task, parsed: reply, toolUseCount: 0, completionEvidence: measuredNoWriteEvidence(), executionPreflight: executionPassed, service,
             createMeta: (stage, instruction, taskRunIndex) => ({ stage, instruction, taskRunIndex }), updatedAt: 150,
@@ -1673,7 +1674,7 @@ describe('OD Next planning coordinator', () => {
           expect(rolledBack.intentResolution?.replyJson).toBeTruthy();
           expect(rolledBack.executionIntent).toBeUndefined();
           expect(rolledBack.outcome).toBe('running');
-          db.exec('DROP TRIGGER reject_completed');
+          dropRowTrigger(db, 'reject_completed', produce ? 'strategy_task_runs' : 'strategy_task_executions');
           closeDatabase(); db = openDatabase(tempDir, { dataDir: tempDir });
           expect(() => startIntentResolution(db, initial.taskExecutionId, task.latestRunId)).toThrow();
         }
@@ -1833,8 +1834,8 @@ describe('OD Next planning coordinator', () => {
     // This row predates both intent mechanisms, unlike a newly created unresolved task.
     db.exec('DELETE FROM strategy_task_intent_resolution');
     db.exec('ALTER TABLE strategy_task_executions DROP COLUMN intent_resolution_version');
-    const columns = db.prepare('PRAGMA table_info(strategy_task_executions)').all() as Array<{ name: string }>;
-    if (columns.some(column => column.name === 'execution_intent')) {
+    const columns = tableColumns(db, 'strategy_task_executions');
+    if (columns.includes('execution_intent')) {
       db.exec('ALTER TABLE strategy_task_executions DROP COLUMN execution_intent');
     }
     migrateStrategyTaskStore(db);

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from '../helpers/test-db.js';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   renderActiveStageBlocks,
@@ -57,7 +58,7 @@ const expectedQualitySections = [
   '### critique-theater',
 ];
 
-let db: Database.Database;
+let db: SqlDatabase;
 let officialManifest: PluginManifest;
 let communityManifest: PluginManifest;
 
@@ -134,7 +135,7 @@ beforeAll(async () => {
   communityManifest = loadManifest(
     'plugins/community/humanize-ppt/open-design.json',
   );
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);

@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../storage/postgres/sql-database.js';
 import { RESTART_ERROR_CODE, type RestartRecoverableDurableRunState } from '../../runtimes/run-restart-recovery.js';
 
 import { InvalidFrozenSkillPackageError } from './frozen-skill-package.js';
@@ -31,7 +31,7 @@ function hasFrozenOwner(
 
 /** Synchronous local replay only. Never hydrate a run, create a successor, or contact a provider. */
 export function recoverPlanningIntentResolution(
-  db: Database.Database,
+  db: SqlDatabase,
   run: IntentRecoveryRunState,
   states: ReadonlyMap<string, IntentRecoveryRunState>,
   now: number,

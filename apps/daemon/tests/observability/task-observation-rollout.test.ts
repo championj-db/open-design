@@ -8,7 +8,7 @@ import {
   OD_NEXT_REQUEST_TURN_SCHEMA_V1,
   type OpenDesignPlanContractV2,
 } from '@open-design/contracts';
-import Database from 'better-sqlite3';
+import type { SqlDatabase } from '../../src/storage/postgres/sql-database.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDatabase, openDatabase, upsertMessage } from '../../src/db.js';
@@ -131,7 +131,7 @@ function planContractFixture(snapshotId: string): OpenDesignPlanContractV2 {
   };
 }
 
-function seedCompletedTask(db: Database.Database): void {
+function seedCompletedTask(db: SqlDatabase): void {
   db.prepare(
     `INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
   ).run('project-1', 'Synthetic project', 1, 1);
@@ -247,7 +247,7 @@ type SyntheticRunLike = Omit<
 
 describe('task observation rollout', () => {
   let tempDir: string;
-  let db: Database.Database;
+  let db: SqlDatabase;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-task-observability-'));
@@ -1569,46 +1569,6 @@ describe('task observation rollout', () => {
       status: 'not_expected',
       dropReason: 'content_consent_off',
       attemptCount: 0,
-    });
-  });
-
-  it('migrates v1 failed Task delivery to retryable pending without changing identity', () => {
-    db.exec(`
-      CREATE TABLE strategy_task_observation_delivery (
-        task_execution_id TEXT PRIMARY KEY,
-        mode TEXT NOT NULL CHECK (mode IN ('observe', 'send')),
-        environment TEXT NOT NULL,
-        tag TEXT NOT NULL,
-        aggregate_digest TEXT,
-        observation_count INTEGER NOT NULL DEFAULT 0,
-        coverage_json TEXT,
-        status TEXT NOT NULL CHECK (
-          status IN ('observed', 'in_flight', 'accepted', 'not_expected', 'failed')
-        ),
-        idempotency_key TEXT,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        crash_window INTEGER NOT NULL DEFAULT 0,
-        started_at INTEGER NOT NULL,
-        drop_reason TEXT,
-        finalized_at INTEGER,
-        updated_at INTEGER NOT NULL
-      );
-      INSERT INTO strategy_task_observation_delivery VALUES (
-        'task-1', 'send', 'synthetic-test', 'od-next-task-v1',
-        NULL, 0, NULL, 'failed', 'od-task-stable', 2, 0,
-        1500, 'langfuse_5xx', 2000, 2000
-      );
-    `);
-
-    service({ mode: 'send' });
-
-    expect(deliveryRow()).toMatchObject({
-      status: 'pending',
-      idempotencyKey: 'od-task-stable',
-      attemptCount: 2,
-      crashWindow: 0,
-      dropReason: 'langfuse_5xx',
-      finalizedAt: null,
     });
   });
 

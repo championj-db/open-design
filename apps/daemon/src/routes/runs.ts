@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -246,7 +246,7 @@ const SEEDED_USER_IMAGE_EXTS = new Set([
   '.bmp',
 ]);
 
-type SqliteDb = Database.Database;
+type SqliteDb = SqlDatabase;
 type ApiRequest = Request<Record<string, string>, unknown, JsonRecord>;
 type ApiResponse = Response<unknown>;
 type AgentCliEnv = Parameters<typeof agentCliEnvForAgent>[0];

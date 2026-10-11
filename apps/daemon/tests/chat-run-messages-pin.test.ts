@@ -1,27 +1,28 @@
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { describe, expect, it } from 'vitest';
 
 import { pinAssistantMessageOnRunCreate } from '../src/runtimes/chat-run-messages.js';
 
-function createDb(): Database.Database {
-  const db = new Database(':memory:');
+function createDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);
     CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      events_json TEXT,
-      run_id TEXT,
-      run_status TEXT,
-      last_run_event_id TEXT,
-      session_mode TEXT,
-      run_context_json TEXT,
-      started_at INTEGER,
-      ended_at INTEGER,
-      position INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      conversation_id TEXT COLLATE "C" NOT NULL,
+      role TEXT COLLATE "C" NOT NULL,
+      content TEXT COLLATE "C" NOT NULL,
+      events_json TEXT COLLATE "C",
+      run_id TEXT COLLATE "C",
+      run_status TEXT COLLATE "C",
+      last_run_event_id TEXT COLLATE "C",
+      session_mode TEXT COLLATE "C",
+      run_context_json TEXT COLLATE "C",
+      started_at BIGINT,
+      ended_at BIGINT,
+      position BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id)
     );
   `);
@@ -29,7 +30,7 @@ function createDb(): Database.Database {
 }
 
 function seedMessage(
-  db: Database.Database,
+  db: SqlDatabase,
   row: {
     id: string;
     conversationId: string;
@@ -60,7 +61,7 @@ function seedMessage(
   );
 }
 
-function readMessage(db: Database.Database, id: string) {
+function readMessage(db: SqlDatabase, id: string) {
   return db
     .prepare(
       `SELECT id, conversation_id AS conversationId, role, content,

@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { SqlDatabase } from '../storage/postgres/sql-database.js';
 import type { MediaTaskInsert, MediaTaskPatch, MediaTaskRow, MediaTaskStatus } from './tasks.js';
 import {
   deleteMediaTask,
@@ -51,7 +51,7 @@ export const TASK_TTL_AFTER_DONE_MS = 60 * 60 * 1000;
 const MEDIA_TERMINAL_STATUSES = new Set<MediaTaskStatus>(['done', 'failed', 'interrupted']);
 
 export function createMediaTaskStore(
-  db: Database.Database,
+  db: SqlDatabase,
   options: MediaTaskStoreOptions = {},
 ): {
   mediaTasks: Map<string, LiveMediaTask>;

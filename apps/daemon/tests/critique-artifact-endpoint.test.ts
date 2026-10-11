@@ -16,7 +16,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import {
   insertCritiqueRun,
   migrateCritique,
@@ -28,22 +29,20 @@ import { handleCritiqueArtifact } from '../src/critique/artifact-handler.js';
 // Test infrastructure
 // ---------------------------------------------------------------------------
 
-function freshDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+function freshDb(): SqlDatabase {
+  const db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id TEXT COLLATE "C" PRIMARY KEY,
+      name TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
     CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
+      id TEXT COLLATE "C" PRIMARY KEY,
+      project_id TEXT COLLATE "C" NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'Project 1', 0, 0);
@@ -54,7 +53,7 @@ function freshDb(): Database.Database {
 }
 
 function startMiniServer(
-  db: Database.Database,
+  db: SqlDatabase,
   artifactsRoot: string,
 ): Promise<{ baseUrl: string; server: http.Server }> {
   const app = express();
@@ -90,7 +89,7 @@ async function get(url: string): Promise<FetchResult> {
 /** Insert a row + place a real artifact file under the artifacts root,
  *  matching what the orchestrator would have written. */
 function seedRowWithArtifact(
-  db: Database.Database,
+  db: SqlDatabase,
   artifactsRoot: string,
   args: {
     runId: string;
@@ -120,7 +119,7 @@ function seedRowWithArtifact(
 // ---------------------------------------------------------------------------
 
 describe('GET /api/projects/:projectId/critique/:runId/artifact', () => {
-  let db: Database.Database;
+  let db: SqlDatabase;
   let artifactsRoot: string;
   let baseUrl: string;
   let server: http.Server;

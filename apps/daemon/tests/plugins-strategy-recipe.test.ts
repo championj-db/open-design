@@ -1,7 +1,8 @@
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { createTestDatabase } from './helpers/test-db.js';
+import type { SqlDatabase } from '../src/storage/postgres/sql-database.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   composeSystemPrompt as composeContractsSystemPrompt,
@@ -37,7 +38,7 @@ const EMPTY_REGISTRY = {
   scenarios: [],
 };
 
-let db: Database.Database;
+let db: SqlDatabase;
 let plugin: InstalledPluginRecord;
 let snapshot: AppliedPluginSnapshot;
 
@@ -70,7 +71,7 @@ async function resolveRecipe(input: {
 }
 
 beforeAll(async () => {
-  db = new Database(':memory:');
+  db = createTestDatabase({ migrate: false });
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT);
