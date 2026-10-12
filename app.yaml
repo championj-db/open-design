@@ -16,5 +16,9 @@ env:
     value: "1"
   - name: NODE_ENV
     value: "production"
+  # Users are already signed in by the Databricks Apps proxy, so skip the
+  # web client's first-run sign-in / model-source onboarding.
+  - name: OD_SKIP_ONBOARDING
+    value: "1"
   - name: OD_ALLOWED_ORIGINS
     value: "https://dbrx-open-design-7474644518594480.aws.databricksapps.com,https://dbrx-open-design-1965859176160743.aws.databricksapps.com"

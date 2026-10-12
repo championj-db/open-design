@@ -21,6 +21,10 @@ Model Serving, UC Volumes, removal list) live in
   Wave 1, `app.yaml` sets `OD_DISABLE_API_AUTH=1` (the daemon's existing
   trusted-reverse-proxy mode), because a non-loopback bind otherwise requires
   `OD_API_TOKEN`.
+- The Apps proxy also means users are already signed in, so `app.yaml` sets
+  `OD_SKIP_ONBOARDING=1`. `GET /api/app-config` then reports
+  `onboardingCompleted: true` (not persisted), and the web client skips the
+  first-run "Welcome to OpenDesign" sign-in / model-source flow.
 - Browser API calls: the daemon's origin check currently accepts only
   loopback/LAN hosts, so requests from the app's `https://<app-name>.<...>.databricksapps.com`
   origin will be rejected until that host is allowlisted. As an interim measure

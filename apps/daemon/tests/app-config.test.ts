@@ -13,7 +13,12 @@ import {
   it,
 } from 'vitest';
 
-import { agentCliEnvForAgent, readAppConfig, writeAppConfig } from '../src/app-config.js';
+import {
+  agentCliEnvForAgent,
+  applyDeploymentOverrides,
+  readAppConfig,
+  writeAppConfig,
+} from '../src/app-config.js';
 import { spawnEnvForAgent } from '../src/runtimes/env.js';
 import { readOdNextRolloutPolicy } from '../src/strategies/od-next/rollout.js';
 import { isLocalSameOrigin } from '../src/origin-validation.js';
@@ -1419,5 +1424,22 @@ describe('app-config odNextStrategyMode', () => {
       onboardingCompleted: true,
       odNextStrategyMode: 'active',
     });
+  });
+});
+
+describe('applyDeploymentOverrides', () => {
+  it('reports onboarding as completed when OD_SKIP_ONBOARDING=1', () => {
+    expect(
+      applyDeploymentOverrides({ onboardingCompleted: false }, { OD_SKIP_ONBOARDING: '1' }),
+    ).toEqual({ onboardingCompleted: true });
+  });
+
+  it('leaves the saved preference untouched otherwise', () => {
+    expect(applyDeploymentOverrides({ onboardingCompleted: false }, {})).toEqual({
+      onboardingCompleted: false,
+    });
+    expect(
+      applyDeploymentOverrides({ onboardingCompleted: false }, { OD_SKIP_ONBOARDING: 'true' }),
+    ).toEqual({ onboardingCompleted: false });
   });
 });

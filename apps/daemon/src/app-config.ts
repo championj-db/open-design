@@ -760,6 +760,20 @@ function applyTelemetryDefaults(prefs: AppConfigPrefs): AppConfigPrefs {
   return prefs;
 }
 
+// Hosted deployments whose platform already authenticates every user (for
+// example Databricks Apps, where the Apps proxy signs users in before any
+// request reaches the daemon) set OD_SKIP_ONBOARDING=1 so the web client
+// never shows the first-run sign-in / model-source flow. The override is
+// applied to what clients read, not persisted, so removing the env var
+// restores the saved preference.
+export function applyDeploymentOverrides(
+  prefs: AppConfigPrefs,
+  env: NodeJS.ProcessEnv = process.env,
+): AppConfigPrefs {
+  if (env.OD_SKIP_ONBOARDING !== '1') return prefs;
+  return { ...prefs, onboardingCompleted: true };
+}
+
 export async function readAppConfig(dataDir: string): Promise<AppConfigPrefs> {
   const base = await readAppConfigFileOnly(dataDir);
   // Channel-root installation file is the new authoritative source for the
