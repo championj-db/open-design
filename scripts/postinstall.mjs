@@ -31,6 +31,7 @@ const localDevelopment = Object.freeze({
     "packages/sidecar",
     "packages/diagnostics",
     "packages/dsh-runtime",
+    "apps/web",
     "apps/daemon",
     "tools/dev",
     "tools/pack",
