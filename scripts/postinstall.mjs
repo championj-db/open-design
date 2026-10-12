@@ -189,6 +189,15 @@ function resolvePackageManagerInvocation() {
 
 const packageManager = resolvePackageManagerInvocation();
 
+// `next build` type-checks the whole web app, which exceeds Node's default
+// ~2 GB heap on hosts like Databricks Apps. Raise the ceiling for build
+// children unless the caller already chose one.
+function buildChildEnv() {
+  const nodeOptions = process.env.NODE_OPTIONS ?? "";
+  if (nodeOptions.includes("--max-old-space-size")) return process.env;
+  return { ...process.env, NODE_OPTIONS: `${nodeOptions} --max-old-space-size=4096`.trim() };
+}
+
 function materializeDomToPptxBundle() {
   const startedAt = Date.now();
   const started = performance.now();
@@ -268,6 +277,7 @@ function runBuildTarget(target) {
       [...packageManager.argsPrefix, "-C", target, "run", "build"],
       {
         cwd: repoRoot,
+        env: buildChildEnv(),
         stdio: "inherit",
       },
     );
