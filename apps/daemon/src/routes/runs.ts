@@ -198,6 +198,7 @@ import {
   deriveActivationMilestones,
   runAskedUserQuestion,
 } from '../runtimes/run-artifacts.js';
+import { carryDatabricksRequestContext } from '../databricks/request-context.js';
 import {
   accountScopedRunWorkspaceScopeForProject,
   pinRunWorkspaceScopeForProject,
@@ -3220,6 +3221,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         ? { byokProvider: requestBody.byokProvider }
         : {}),
     };
+    carryDatabricksRequestContext(req, run);
     internalRuns.start(
       run,
       {
@@ -4087,6 +4089,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         ? { byokProvider: requestBody.byokProvider }
         : {}),
     };
+    carryDatabricksRequestContext(req, run);
     internalRuns.start(
       run,
       { body: requestBody, requestAnalyticsContext: readAnalyticsContext(req) },

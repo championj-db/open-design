@@ -270,6 +270,11 @@ interface Props {
   onInvite?: () => void;
   /** Start the cloud sign-in / team flow from the local-state callout. */
   onSignInCloud?: () => void;
+  /**
+   * The user the platform signed in (Databricks Apps), shown in the local
+   * account dock in place of the local-mode label. Null/absent → local mode.
+   */
+  platformAccount?: { name: string; detail: string } | null;
   /** Clear app-owned model-source state after the daemon confirms sign-out. */
   onSignedOut?: () => void | Promise<void>;
   /**
@@ -2100,6 +2105,7 @@ export function EntryNavRail({
   balanceUsd,
   onOpenSettings,
   onSignedOut,
+  platformAccount,
   updaterSlot,
   footerNotice,
   recentProjects,
@@ -2768,7 +2774,7 @@ export function EntryNavRail({
                 type="button"
                 className="entry-nav-rail__account-trigger"
                 aria-label={t('entry.accountSettings')}
-                title={t('entry.accountSettings')}
+                title={platformAccount?.detail ?? t('entry.accountSettings')}
                 data-testid="entry-nav-local-account"
                 onClick={() => {
                   trackAccountMenuClick(analytics.track, {
@@ -2779,13 +2785,21 @@ export function EntryNavRail({
                   onOpenSettings?.();
                 }}
               >
-                <span
-                  className="entry-nav-rail__account-avatar entry-nav-rail__account-avatar--local"
-                  aria-hidden
-                >
-                  <Icon name="terminal" size={14} />
+                {platformAccount ? (
+                  <span className="entry-nav-rail__account-avatar" aria-hidden>
+                    {platformAccount.name.trim().charAt(0).toUpperCase() || '?'}
+                  </span>
+                ) : (
+                  <span
+                    className="entry-nav-rail__account-avatar entry-nav-rail__account-avatar--local"
+                    aria-hidden
+                  >
+                    <Icon name="terminal" size={14} />
+                  </span>
+                )}
+                <span className="entry-nav-rail__account-name">
+                  {platformAccount?.name ?? t('entry.localAccountName')}
                 </span>
-                <span className="entry-nav-rail__account-name">{t('entry.localAccountName')}</span>
               </button>
               <button
                 type="button"

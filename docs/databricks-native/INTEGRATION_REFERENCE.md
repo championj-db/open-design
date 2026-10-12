@@ -27,6 +27,7 @@ Next.js export. All patterns below must be implemented in TS, not Python.
 - System env vars available in-app include the workspace host and the app's service-principal identity.
 
 ## 2. Authentication / On-Behalf-Of (OBO) — replaces OD_API_TOKEN + all external OAuth
+> Implemented (`OD_AUTH_MODE=databricks`, `apps/daemon/src/databricks/`); see `README.md` → Authentication.
 - Enable **user authorization (OBO)** on the app; select the **minimum** user API scopes needed.
 - Per request, read header **`X-Forwarded-Access-Token`** = short-lived OAuth token for the signed-in user.
   - **Fail closed** if absent (do NOT silently fall back to the app service principal for user actions).
@@ -54,6 +55,7 @@ Next.js export. All patterns below must be implemented in TS, not Python.
   `datetime('now')`→`now()`, boolean-as-int, `json` as TEXT vs native `jsonb`, `PRAGMA`, `.changes`/`lastInsertRowid`.
 
 ## 4. AI — Mosaic AI Gateway / Model Serving ("unity gateway") — replaces node-pty CLIs + BYOK + Vela/AMR
+> Implemented as the `databricks` agent (OpenAI-compatible chat completions, OBO); see `README.md` → AI. The Anthropic passthrough is retired on the au-pubsec workspace ("Use Unity Catalog model services").
 - Call Databricks serving endpoints with the **Databricks token** (OBO user token preferred, else SP). No vendor API keys.
 - Two usable surfaces (verify which the workspace exposes):
   - **Unified Chat Completions (provider-agnostic, preferred default):**

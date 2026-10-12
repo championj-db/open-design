@@ -3,6 +3,7 @@ const AGENT_LABELS: Record<string, string> = {
   amp: 'Amp',
   claude: 'Claude',
   codex: 'Codex',
+  databricks: 'Databricks',
   devin: 'Devin',
   gemini: 'Gemini',
   kimi: 'Kimi CLI',

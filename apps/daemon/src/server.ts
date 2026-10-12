@@ -1207,6 +1207,17 @@ import {
   isApiAuthDisabled,
   isApiTokenMiddlewareEnabled,
 } from './api-token-auth.js';
+import { resolveDaemonAuthMode } from './databricks/auth-mode.js';
+import { databricksAppOrigins } from './databricks/forwarded-headers.js';
+import {
+  createDatabricksAuthMiddleware,
+  createExternalAuthDisabledMiddleware,
+} from './databricks/middleware.js';
+import { createDatabricksRuntimeFromEnv } from './databricks/runtime.js';
+import { databricksRequestContext } from './databricks/request-context.js';
+import { databricksAgentForRequest } from './databricks/agent-models.js';
+import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
+import { registerAuthSessionRoutes } from './routes/auth-session.js';
 import { createOpenDesignPublicMetadataService } from './services/open-design-public-metadata.js';
 import { createWhatsNewService } from './services/whats-new.js';
 import { execCommandViaLoginShell } from './services/login-shell.js';
@@ -3166,7 +3177,18 @@ export async function startServer({
   const apiTokenAuthEnabled = apiToken.length > 0 && !apiAuthDisabled;
   const isApiTokenAuthorization = (authorization: string | undefined): boolean =>
     apiTokenAuthEnabled && apiTokenAuthorizationMatches(authorization, apiToken);
-  if (!isLoopbackHostname(host) && apiToken.length === 0 && !apiAuthDisabled) {
+  // Databricks Apps deployments (OD_AUTH_MODE=databricks) authenticate every
+  // /api request with the user's forwarded on-behalf-of token instead; see
+  // databricks/middleware.ts. That mode replaces the token model, so mixing
+  // the two is a configuration error rather than something to reconcile.
+  const authMode = resolveDaemonAuthMode();
+  const databricksRuntime = authMode === 'databricks' ? createDatabricksRuntimeFromEnv() : null;
+  if (databricksRuntime && (apiToken.length > 0 || apiAuthDisabled)) {
+    throw new Error(
+      'OD_AUTH_MODE=databricks replaces OD_API_TOKEN and OD_DISABLE_API_AUTH; unset them.',
+    );
+  }
+  if (!isLoopbackHostname(host) && apiToken.length === 0 && !apiAuthDisabled && !databricksRuntime) {
     throw new Error(
       `OD_BIND_HOST=${host} requires OD_API_TOKEN to be set. ` +
       `Generate one with \`openssl rand -hex 32\` and re-launch. ` +
@@ -3234,26 +3256,25 @@ export async function startServer({
   // browser iframes can load HTML/CSS/JS without privileged headers.
   // Rich daemon status stays authenticated because it includes local
   // runtime paths.
+  const openProbePaths = new Set([
+    '/health',
+    '/api/health',
+    '/ready',
+    '/api/ready',
+    '/version',
+    '/api/version',
+  ]);
+  const isScopedPreviewAssetGet = (req: express.Request): boolean => {
+    if (req.method !== 'GET') return false;
+    const previewAsset = parseProjectPreviewAssetPath(req.path);
+    return Boolean(
+      previewAsset && projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope),
+    );
+  };
   if (apiTokenAuthEnabled) {
-    const openProbePaths = new Set([
-      '/health',
-      '/api/health',
-      '/ready',
-      '/api/ready',
-      '/version',
-      '/api/version',
-    ]);
     app.use('/api', (req, res, next) => {
       if (openProbePaths.has(req.path)) return next();
-      if (req.method === 'GET') {
-        const previewAsset = parseProjectPreviewAssetPath(req.path);
-        if (
-          previewAsset &&
-          projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope)
-        ) {
-          return next();
-        }
-      }
+      if (isScopedPreviewAssetGet(req)) return next();
       // Loopback short-circuit. We ignore the proxied X-Forwarded-For
       // header here because a reverse proxy MUST always forward the
       // credentials; the loopback bypass exists for the localhost desktop
@@ -3295,6 +3316,17 @@ export async function startServer({
         'OpenDesign authentication required. Use username "open-design" and OD_API_TOKEN as the password.',
       );
     });
+  }
+
+  if (databricksRuntime) {
+    app.use(
+      '/api',
+      createDatabricksAuthMiddleware({
+        identity: databricksRuntime.identity,
+        isOpenRequest: (req) => openProbePaths.has(req.path) || isScopedPreviewAssetGet(req),
+      }),
+    );
+    app.use(createExternalAuthDisabledMiddleware());
   }
 
   const designSystemServices = createDesignSystemServerServices({
@@ -3385,7 +3417,12 @@ export async function startServer({
       : host;
   }
 
+  // Powered previews need a second, directly reachable loopback origin. Behind
+  // the Databricks Apps proxy the browser can reach only the app's own origin,
+  // and the proxy's upstream Host (localhost:<port>) would otherwise be taken
+  // for that preview origin, refusing every browser API call.
   function poweredPreviewHost(): string | null {
+    if (databricksRuntime) return null;
     const reportHost = reportHostForPoweredPreview();
     if (reportHost === '127.0.0.1') return 'localhost';
     if (reportHost === 'localhost') return '127.0.0.1';
@@ -3472,7 +3509,11 @@ export async function startServer({
     const ports = allowedBrowserPorts(resolvedPort);
     // Paired browser-extension origins are persisted in library_tokens and
     // seeded into this in-memory allowlist at boot / on pairing.
-    const allowedOrigins = [...extraAllowedOrigins, ...libraryExtensionAllowedOrigins()];
+    const allowedOrigins = [
+      ...extraAllowedOrigins,
+      ...libraryExtensionAllowedOrigins(),
+      ...databricksAppOrigins(req.headers),
+    ];
     if (!isAllowedBrowserOrigin(origin, req.headers.host, ports, host, allowedOrigins)) {
       if (req.method !== 'GET' || !isPortlessLoopbackOrigin(String(origin))) {
         return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
@@ -8233,6 +8274,8 @@ export async function startServer({
     });
   });
 
+  registerAuthSessionRoutes(app, { authMode });
+
   app.get('/api/version', async (_req, res) => {
     const version = await readCurrentAppVersionInfo();
     // Now that this payload carries a runtime capability it is no longer a
@@ -8263,7 +8306,9 @@ export async function startServer({
   // then treats that swapped browser origin as preview-only.
   app.get('/api/preview/isolation', (_req, res) => {
     const reportHost = reportHostForPoweredPreview();
-    const baseOrigin = resolvedPort ? `http://${reportHost}:${resolvedPort}` : null;
+    const baseOrigin = resolvedPort && poweredPreviewHost()
+      ? `http://${reportHost}:${resolvedPort}`
+      : null;
     res.setHeader('Cache-Control', 'no-store');
     /** @type {import('@open-design/contracts').ProjectPreviewIsolationResponse} */
     const body = {
@@ -8987,6 +9032,9 @@ export async function startServer({
     verifyWorkspaceReadAuthority,
     verifyWorkspaceRequestAuthority,
     teamResources: collab.teamResources,
+    ...(databricksRuntime
+      ? { agentForRequest: (agent, req) => databricksAgentForRequest(databricksRuntime, agent, req) }
+      : {}),
     resources: {
       listAllSkills,
       listAllDesignTemplates,
@@ -11075,6 +11123,19 @@ export async function startServer({
       return failRun(
         'BYOK_PROVIDER_REQUIRED',
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+      );
+    }
+    // The Databricks agent acts as the user whose request started this run
+    // (carried onto the run by routes/runs.ts). Without that user's token it
+    // has no identity to call Model Serving with, and it never borrows the
+    // app service principal's.
+    const databricksRunUser = def.id === DATABRICKS_AGENT_ID && databricksRuntime
+      ? databricksRequestContext(run)
+      : null;
+    if (def.id === DATABRICKS_AGENT_ID && !databricksRunUser) {
+      return failRun(
+        'DATABRICKS_AUTH_REQUIRED',
+        'This run has no signed-in Databricks user. Reload OpenDesign and send the message again.',
       );
     }
     const requestedRuntimeModel = def.id === 'byok-opencode'
@@ -14356,6 +14417,12 @@ export async function startServer({
         ...(mmdRouteLaunchEnv || {}),
         ...odMediaEnv,
         ...(byokOpenCodeProvider ? byokOpenCodeProvider.env : {}),
+        ...(databricksRunUser && databricksRuntime
+          ? {
+              DATABRICKS_HOST: databricksRuntime.host,
+              DATABRICKS_TOKEN: databricksRunUser.accessToken,
+            }
+          : {}),
         ...await openDesignAmrTraceEnvForRun({
           agentId: def.id,
           runId: run.id,
@@ -14431,6 +14498,13 @@ export async function startServer({
           ? { OD_TASK_INPUT_DIR: odNextTaskInputSnapshot.projectionDir }
           : {}),
       }, agentLaunch);
+      if (databricksRuntime) {
+        // No agent child acts as the app itself: drop the service principal
+        // credentials Databricks Apps puts in the daemon's environment, so
+        // nothing a run executes can reach the workspace beyond its user.
+        delete env.DATABRICKS_CLIENT_ID;
+        delete env.DATABRICKS_CLIENT_SECRET;
+      }
       if (def.id === 'opencode' || def.id === 'byok-opencode') {
         try {
           const versions = await ensureDetectedRuntimeVersions('opencode', configuredAgentEnv);

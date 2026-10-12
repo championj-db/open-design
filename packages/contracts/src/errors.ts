@@ -189,6 +189,21 @@ export const API_ERROR_CODES = [
   // composer instead of waiting on a stalled create. Retryable: the same
   // client-minted project id may be resubmitted.
   'PROJECT_CREATE_PREPARATION_TIMEOUT',
+  // Databricks Apps on-behalf-of auth (`OD_AUTH_MODE=databricks`). A request
+  // came through the Apps proxy without a forwarded user token, or SCIM `Me`
+  // rejected the token it carried (HTTP 401), or the token lacks the
+  // `iam.current-user:read` user API scope (HTTP 403). The browser recovers by
+  // reloading so the proxy signs the user in again. The daemon never answers
+  // such a request as the app service principal instead.
+  'DATABRICKS_AUTH_REQUIRED',
+  // SCIM `Me` could not be reached to verify the forwarded token, so the
+  // request is refused rather than served unverified (HTTP 503). Retryable.
+  'DATABRICKS_IDENTITY_UNAVAILABLE',
+  // An external sign-in or OAuth flow (OpenDesign Cloud, xAI, MCP server
+  // OAuth, connector OAuth, agent CLI login) was requested on a deployment
+  // whose users are authenticated by the platform (HTTP 403). Those flows are
+  // disabled there by design; not retryable.
+  'EXTERNAL_AUTH_DISABLED',
   'INTERNAL_ERROR',
 ] as const;
 

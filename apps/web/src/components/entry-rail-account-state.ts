@@ -38,7 +38,11 @@ export function resolveEntryRailAccountFooterState(
   workspaceState: WorkspaceContextState,
   amrLoggedIn: boolean | null | undefined,
   amrSessionState?: import('@open-design/contracts').AmrSessionState,
+  platformManagedAuth = false,
 ): EntryRailAccountFooterState {
+  // The platform (Databricks Apps) owns sign-in: there is no Cloud account to
+  // sync, recover, or sign in to, and the rail names the platform user instead.
+  if (platformManagedAuth) return 'hidden';
   if (requiresAmrReauthentication(amrSessionState, workspaceState.failure)) return 'sign-in';
   if (workspaceState.context) return 'hidden';
   if (workspaceState.loading) return 'syncing';

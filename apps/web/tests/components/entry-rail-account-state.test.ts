@@ -11,6 +11,18 @@ const SIGNED_IN_CONTEXT = {
 } as WorkspaceContextState['context'];
 
 describe('resolveEntryRailAccountFooterState', () => {
+  it('hides every Cloud sign-in notice when the platform manages auth', () => {
+    expect(resolveEntryRailAccountFooterState({
+      context: null,
+      loading: false,
+      failure: 'reauth-required',
+    }, false, 'reauth_required', true)).toBe('hidden');
+    expect(resolveEntryRailAccountFooterState({
+      context: null,
+      loading: true,
+    }, null, undefined, true)).toBe('hidden');
+  });
+
   it('keeps the resolved account row when a workspace context exists', () => {
     expect(resolveEntryRailAccountFooterState({
       context: SIGNED_IN_CONTEXT,

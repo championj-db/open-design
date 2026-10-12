@@ -246,6 +246,7 @@ import {
 import { resolveByokModelPreference } from './byok/validation';
 import onboardingWelcomeStyles from './OnboardingWelcome.module.css';
 import { AmrActivationHintText } from './AmrActivationHintText';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
 
 // How long a cloud sign-in waits for the browser before offering to reopen it.
 const ACTIVATION_HINT_DELAY_MS = 5000;
@@ -703,10 +704,21 @@ export function EntryShell({
   // unresolved or unavailable authority into an anonymous, unbound create.
   const workspaceContextState = useWorkspaceContext();
   const { context: workspaceContext, loading: workspaceLoading } = workspaceContextState;
+  // On a Databricks App the platform signed the user in: the rail names that
+  // user, and nothing here may send them to the Cloud sign-in.
+  const authSession = useAuthSession();
+  const platformManagedAuth = isPlatformManagedAuth(authSession);
+  const platformAccount = platformManagedAuth && authSession?.user
+    ? {
+        name: authSession.user.displayName ?? authSession.user.userName,
+        detail: authSession.user.email ?? authSession.user.userName,
+      }
+    : null;
   const accountFooterState = resolveEntryRailAccountFooterState(
     workspaceContextState,
     amrLoggedIn,
     amrSessionState,
+    platformManagedAuth,
   );
   const railWorkspaceContext = accountFooterState === 'sign-in'
     ? null
@@ -714,20 +726,24 @@ export function EntryShell({
   const usesOpenDesignCloud = config.mode === 'daemon' && config.agentId === 'amr';
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE ?? null;
   const amrAuthRequired =
-    workspaceContextState.failure === 'reauth-required'
-    || (
-      usesOpenDesignCloud
-      && requiresAmrReauthentication(amrSessionState, workspaceContextState.failure)
+    !platformManagedAuth
+    && (
+      workspaceContextState.failure === 'reauth-required'
+      || (
+        usesOpenDesignCloud
+        && requiresAmrReauthentication(amrSessionState, workspaceContextState.failure)
+      )
     );
   useEffect(() => {
     // The entry shell is an authenticated surface. Both an explicit signed-out
     // status and a definitive credential rejection return to the existing
     // Cloud identity gate. Passive reauthentication preserves the saved model
     // source and Home's locally persisted, not-yet-sent draft.
-    const selectedCloudIdentityRejected = usesOpenDesignCloud && amrLoggedIn === false;
+    const selectedCloudIdentityRejected =
+      !platformManagedAuth && usesOpenDesignCloud && amrLoggedIn === false;
     if ((!selectedCloudIdentityRejected && !amrAuthRequired) || view === 'onboarding') return;
     navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
-  }, [amrAuthRequired, amrLoggedIn, usesOpenDesignCloud, view]);
+  }, [amrAuthRequired, amrLoggedIn, platformManagedAuth, usesOpenDesignCloud, view]);
   let accountFooterNotice: ReactNode = null;
   if (accountFooterState === 'syncing') {
     accountFooterNotice = <RailAccountSyncTip />;
@@ -1836,6 +1852,7 @@ export function EntryShell({
           onOpenSettings={onOpenSettings}
           onInvite={() => changeView('members')}
           onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}
+          platformAccount={platformAccount}
           onSignedOut={onSignedOut}
           updaterSlot={updaterSlot}
           // A loading or unavailable workspace read is not proof of sign-out.

@@ -8,13 +8,13 @@
 command: ["node", "apps/daemon/dist/cli.js", "--no-open"]
 
 env:
-  # Wave 1 only: the Databricks Apps proxy authenticates every request before
-  # it reaches the container, which is the daemon's existing "trusted reverse
-  # proxy" mode. Wave 2 replaces this with per-request OBO auth
-  # (X-Forwarded-Access-Token).
-  - name: OD_DISABLE_API_AUTH
-    value: "1"
+  # On-behalf-of auth: every /api request must carry the signed-in user's
+  # X-Forwarded-Access-Token, verified against SCIM Me (fail closed). Replaces
+  # OD_API_TOKEN / OD_DISABLE_API_AUTH, accepts the app's own origin natively,
+  # skips the first-run onboarding, and disables external sign-in flows.
+  # Requires user authorization on the app with at least the
+  # iam.current-user:read user API scope.
+  - name: OD_AUTH_MODE
+    value: "databricks"
   - name: NODE_ENV
     value: "production"
-  - name: OD_ALLOWED_ORIGINS
-    value: "https://dbrx-open-design-7474644518594480.aws.databricksapps.com,https://dbrx-open-design-1965859176160743.aws.databricksapps.com"

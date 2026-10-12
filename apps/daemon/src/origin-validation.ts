@@ -1,3 +1,5 @@
+import { databricksAppOrigins } from './databricks/forwarded-headers.js';
+
 export interface ParsedHostHeader {
   hostname: string;
   host: string;
@@ -218,7 +220,12 @@ export function isLocalSameOrigin(
   const origin = headerValue(req.headers?.origin);
   const ports = allowedBrowserPorts(port, env);
   const bindHost = env.OD_BIND_HOST || '127.0.0.1';
-  const extraAllowedOrigins = configuredAllowedOrigins(env);
+  // Behind the Databricks Apps proxy the app's own origin is a same-origin
+  // caller even though the proxy rewrites Host; see databricksAppOrigins.
+  const extraAllowedOrigins = [
+    ...configuredAllowedOrigins(env),
+    ...databricksAppOrigins(req.headers, env),
+  ];
   const ipOnlyExtraOrigins = extraAllowedOrigins.filter((o) =>
     isIpLiteralHostname(new URL(o).hostname),
   );

@@ -9,6 +9,7 @@ import type {
   ProjectMediaTaskFile,
 } from '@open-design/contracts';
 import type { AnalyticsContext } from '../analytics.js';
+import { applyDeploymentOverrides } from '../app-config.js';
 import { defaultMediaExecutionPolicy, mediaPolicyDenial } from '../media/policy.js';
 import { formatMediaTaskDiagnostic } from '../media/diagnostics.js';
 import { findMediaModel } from '../media/models.js';
@@ -800,7 +801,7 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
       return res.status(403).json({ error: 'cross-origin request rejected' });
     }
     try {
-      const config = await readAppConfig(RUNTIME_DATA_DIR);
+      const config = applyDeploymentOverrides(await readAppConfig(RUNTIME_DATA_DIR));
       res.json({ config });
     } catch (err: any) {
       res
