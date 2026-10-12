@@ -193,6 +193,25 @@ describe('Databricks auth mode requests', () => {
     expect(crossOrigin.status).toBe(403);
   });
 
+  it('serves browser API calls whose proxied Host looks like the loopback preview origin', async () => {
+    const base = await startDatabricksDaemon();
+    const port = new URL(base).port;
+    // The Apps proxy connects with an upstream Host such as localhost:<port>,
+    // and browsers always send fetch metadata.
+    const browser = proxied({
+      'x-forwarded-access-token': GOOD_TOKEN,
+      host: `localhost:${port}`,
+      origin: APP_ORIGIN,
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+    });
+    const config = await request(`${base}/api/app-config`, { headers: browser });
+    expect(config.status).toBe(200);
+    const isolation = await request(`${base}/api/preview/isolation`, { headers: browser });
+    expect(isolation.json).toMatchObject({ supported: false, baseOrigin: null });
+  });
+
   it('refuses external sign-in flows', async () => {
     const base = await startDatabricksDaemon();
     const res = await request(`${base}/api/integrations/vela/login`, {

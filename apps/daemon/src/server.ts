@@ -3414,7 +3414,12 @@ export async function startServer({
       : host;
   }
 
+  // Powered previews need a second, directly reachable loopback origin. Behind
+  // the Databricks Apps proxy the browser can reach only the app's own origin,
+  // and the proxy's upstream Host (localhost:<port>) would otherwise be taken
+  // for that preview origin, refusing every browser API call.
   function poweredPreviewHost(): string | null {
+    if (databricksRuntime) return null;
     const reportHost = reportHostForPoweredPreview();
     if (reportHost === '127.0.0.1') return 'localhost';
     if (reportHost === 'localhost') return '127.0.0.1';
@@ -8298,7 +8303,9 @@ export async function startServer({
   // then treats that swapped browser origin as preview-only.
   app.get('/api/preview/isolation', (_req, res) => {
     const reportHost = reportHostForPoweredPreview();
-    const baseOrigin = resolvedPort ? `http://${reportHost}:${resolvedPort}` : null;
+    const baseOrigin = resolvedPort && poweredPreviewHost()
+      ? `http://${reportHost}:${resolvedPort}`
+      : null;
     res.setHeader('Cache-Control', 'no-store');
     /** @type {import('@open-design/contracts').ProjectPreviewIsolationResponse} */
     const body = {
