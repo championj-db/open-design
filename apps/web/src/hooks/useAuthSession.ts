@@ -46,6 +46,12 @@ export function resetAuthSessionForTests(): void {
   resolvedSession = null;
 }
 
+/** Test seam: answer the page-level session read as if the daemon had. */
+export function seedAuthSessionForTests(session: AuthSessionResponse): void {
+  resolvedSession = session;
+  sessionRequest = Promise.resolve(session);
+}
+
 /** Null until the daemon answers (or when it cannot). */
 export function useAuthSession(): AuthSessionResponse | null {
   const [session, setSession] = useState<AuthSessionResponse | null>(resolvedSession);
@@ -67,4 +73,19 @@ export function useAuthSession(): AuthSessionResponse | null {
  */
 export function isPlatformManagedAuth(session: AuthSessionResponse | null): boolean {
   return session?.provider === 'databricks';
+}
+
+/**
+ * OpenDesign Cloud account surfaces (sign-in and sign-up prompts, credits,
+ * plans, and the Cloud's community links) may show only once the daemon has
+ * said the caller is a local user. On a Databricks App the platform signs users
+ * in and the daemon refuses the Cloud sign-in, so they stay hidden — including
+ * while the session is still loading, so a Databricks page never flashes one.
+ */
+export function cloudAccountSurfacesAllowed(session: AuthSessionResponse | null): boolean {
+  return session?.provider === 'local';
+}
+
+export function useCloudAccountSurfacesAllowed(): boolean {
+  return cloudAccountSurfacesAllowed(useAuthSession());
 }

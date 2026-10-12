@@ -32,6 +32,7 @@ const ICON_EXT: Record<string, 'svg' | 'png'> = {
   kilo: 'svg',
   vibe: 'svg',
   antigravity: 'svg',
+  databricks: 'svg',
   aider: 'png',
   'trae-cli': 'png',
   devin: 'png',

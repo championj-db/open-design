@@ -212,6 +212,7 @@ import {
   resolveAccentColor,
 } from '../state/appearance';
 import { isAutosaveDraftOnlyChange } from '../App';
+import { useCloudAccountSurfacesAllowed } from '../hooks/useAuthSession';
 import {
   FAILURE_SOUNDS,
   SUCCESS_SOUNDS,
@@ -1699,6 +1700,7 @@ export function SettingsDialog({
   const [amrCardStatus, setAmrCardStatus] = useState<VelaLoginStatus | null>(null);
   const [amrCardStatusReady, setAmrCardStatusReady] = useState(false);
   const amrCardSignedIn = isAmrSessionAuthenticated(amrCardStatus);
+  const cloudAccountSurfacesAllowed = useCloudAccountSurfacesAllowed();
   // Picking OpenDesign while signed out only selects it inside Settings:
   // writing `agentId: 'amr'` without a session trips App's "cloud identity
   // rejected" guard, which bounces the user to onboarding. The selected card
@@ -4527,7 +4529,7 @@ export function SettingsDialog({
                 </button>
               </div>
               </div>
-              {cfg.mode === 'daemon' && !amrCardSignedIn ? (
+              {cfg.mode === 'daemon' && !amrCardSignedIn && cloudAccountSurfacesAllowed ? (
                 // Only prompt to sign into OpenDesign Cloud when NOT already
                 // signed in — the AMR/vela session IS the cloud identity (one
                 // session drives both), so a logged-in user has nothing to do

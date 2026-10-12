@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { TrackingProjectKind } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
 import { trackFileManagerClick } from '../analytics/events';
+import { useCloudAccountSurfacesAllowed } from '../hooks/useAuthSession';
 import { useT } from '../i18n';
 import { LIBRARY_UI_VISIBLE } from '../features/libraryUi';
 import type { Dict } from '../i18n/types';
@@ -391,7 +392,12 @@ function RotatingTip({ auxiliary = false }: { auxiliary?: boolean }) {
   // depends only on `index` — depending on the (re-created) array would reset
   // the typewriter on every render and never advance.
   const tipsRef = useRef<string[]>([]);
-  tipsRef.current = USEFUL_TIPS.map(({ key }) => t(key));
+  // The linked tips point at OpenDesign's own community channels, which go
+  // wherever its Cloud account surfaces go.
+  const tips = useCloudAccountSurfacesAllowed()
+    ? USEFUL_TIPS
+    : USEFUL_TIPS.filter((tip) => !tip.url);
+  tipsRef.current = tips.map(({ key }) => t(key));
 
   useEffect(() => {
     const tips = tipsRef.current;
@@ -438,8 +444,8 @@ function RotatingTip({ auxiliary = false }: { auxiliary?: boolean }) {
         <span className="df-useful-info-label">{t('designFiles.usefulInfoLabel')}</span>
       </div>
       <span className="df-useful-info-tip">
-        {USEFUL_TIPS[index]?.url ? (
-          <a className="df-tip-link" href={USEFUL_TIPS[index].url} target="_blank" rel="noreferrer">
+        {tips[index]?.url ? (
+          <a className="df-tip-link" href={tips[index].url} target="_blank" rel="noreferrer">
             {typed}
           </a>
         ) : (

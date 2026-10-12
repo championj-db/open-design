@@ -129,6 +129,7 @@ import {
   stableAnalyticsErrorCode,
   workspaceAnalyticsDimensions,
 } from '../analytics/workspace';
+import { useCloudAccountSurfacesAllowed } from '../hooks/useAuthSession';
 import { WorkbenchCampaignBadge } from './WorkbenchCampaignBadge';
 import { workspaceChromeAccountActionsHost } from './workspaceChromeActions';
 
@@ -2027,6 +2028,9 @@ function RailSocialRow({
 }) {
   const { t, locale } = useI18n();
   const analytics = useAnalytics();
+  // The links are the OpenDesign Cloud's (Discord credits, its support inbox),
+  // so they go wherever its account surfaces go.
+  const cloudLinksAllowed = useCloudAccountSurfacesAllowed();
   // The rail sits on the leading edge, so tooltips open away from it —
   // right in LTR, left once RTL moves the whole rail to the right edge.
   // Without the flip the bubble would be clamped against the viewport
@@ -2054,6 +2058,8 @@ function RailSocialRow({
       ...dimensions,
     });
   }
+
+  if (!cloudLinksAllowed) return null;
 
   return (
     <div className="entry-nav-rail__menu-social" data-testid="entry-nav-rail-social">

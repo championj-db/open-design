@@ -236,7 +236,7 @@ import {
   ProjectCreateError,
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
-import { isPlatformManagedAuth, useAuthSession } from './hooks/useAuthSession';
+import { cloudAccountSurfacesAllowed, useAuthSession } from './hooks/useAuthSession';
 import { resumeThumbnailLoads, suspendThumbnailLoads } from './lib/thumbnail-load-gate';
 import type {
   PluginShareAction,
@@ -970,8 +970,9 @@ function AppInner() {
   const hostPlatform = useMemo(() => getOpenDesignHost()?.client.platform, []);
   useModalWindowDragGuard();
   const workspaceContextState = useWorkspaceContext();
-  // Databricks Apps signs users in itself; never route them to the Cloud sign-in.
-  const platformManagedAuth = isPlatformManagedAuth(useAuthSession());
+  // Databricks Apps signs users in itself; never route them to the Cloud
+  // sign-in, nor before the daemon has said the caller is a local user.
+  const cloudAccountHidden = !cloudAccountSurfacesAllowed(useAuthSession());
   const {
     context: workspaceContext,
     loading: workspaceContextLoading,
@@ -2094,7 +2095,7 @@ function AppInner() {
   }, [applyAmrLoginStatus]);
 
   useEffect(() => {
-    if (platformManagedAuth) return;
+    if (cloudAccountHidden) return;
     const usesOpenDesignCloud =
       config.mode === 'daemon'
       && config.agentId === AMR_AGENT_ID;
@@ -2114,7 +2115,7 @@ function AppInner() {
     amrLoginStatus,
     config.agentId,
     config.mode,
-    platformManagedAuth,
+    cloudAccountHidden,
     route,
     workspaceContextState.failure,
   ]);

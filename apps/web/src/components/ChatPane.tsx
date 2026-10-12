@@ -75,6 +75,7 @@ import {
   openChatSurface,
   type ChatSurfaceHandle,
 } from '../observability/chat-health';
+import { useCloudAccountSurfacesAllowed } from '../hooks/useAuthSession';
 import { useI18n, useT } from '../i18n';
 import { startersForProduct, type ProductType } from '../onboarding/recommendation';
 import { starterCopyFor } from '../onboarding/starter-copy';
@@ -2495,8 +2496,11 @@ export function ChatPane({
   // The classifier still owns approved copy and handoffs, never extra buttons.
   const failedRunUsesCloud = retryAssistant?.agentId === 'amr';
   const showCloudRetry = Boolean(retryAssistant && failedRunUsesCloud && onRetry);
+  // Only offered where a Cloud account can be signed into at all.
+  const cloudAccountSurfacesAllowed = useCloudAccountSurfacesAllowed();
   const showCloudSwitchCta = Boolean(
-    retryAssistant && !failedRunUsesCloud
+    cloudAccountSurfacesAllowed
+    && retryAssistant && !failedRunUsesCloud
     && (onSwitchToAmrAndRetry || onOpenAmrSettings),
   );
   const [supportDialogOpen, setSupportDialogOpen] = useState(false);

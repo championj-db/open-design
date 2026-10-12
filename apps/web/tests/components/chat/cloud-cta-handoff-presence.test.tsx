@@ -23,6 +23,7 @@ vi.mock('../../../src/analytics/events', async (importOriginal) => {
 });
 
 import { ChatPane } from '../../../src/components/ChatPane';
+import { seedAuthSessionForTests } from '../../../src/hooks/useAuthSession';
 import type { AppConfig, ChatMessage } from '../../../src/types';
 
 /** 真字典 —— 判据钉在用户看到的那行字上,不钉键名 */
@@ -253,5 +254,19 @@ describe('反向锚点 · 接手方在场的宿主行为不变', () => {
     const primaries = primaryActions(container);
     expect(primaries).toHaveLength(1);
     expect(primaries[0]!.getAttribute('data-testid')).toBe('chat-error-switch-to-cloud');
+  });
+});
+
+describe('Databricks App: the platform signs users in', () => {
+  it('a failed Databricks run offers no switch to the OpenDesign Cloud', () => {
+    seedAuthSessionForTests({ provider: 'databricks', user: null });
+    renderFailure({
+      code: 'AGENT_EXECUTION_FAILED',
+      detail: 'process_crashed',
+      host: projectViewWiring(),
+    });
+
+    expect(screen.getByTestId('chat-run-error-card')).toBeTruthy();
+    expect(screen.queryByTestId('chat-error-switch-to-cloud')).toBeNull();
   });
 });
