@@ -69,6 +69,40 @@ With `OD_AUTH_MODE=databricks` the daemon builds on that:
   least the `iam.current-user:read` user API scope. Add further scopes only as
   later waves need them.
 
+## AI (Model Serving)
+
+Generation runs on the workspace's own models, as the signed-in user:
+
+- **Agent.** In Databricks auth mode the daemon registers a `databricks` agent
+  (`apps/daemon/src/runtimes/defs/databricks.ts`). It is the default for users
+  who have not picked an agent (`GET /api/app-config` reports
+  `agentId: "databricks"`; not persisted).
+- **Harness.** A run spawns OpenDesign's own chat/tool loop
+  (`apps/daemon/src/databricks/agent-harness.ts`) with the daemon's Node; no
+  external agent CLI is installed. It calls the OpenAI-compatible
+  `POST /serving-endpoints/chat/completions` with streaming and tool calling.
+  It speaks Claude Code stream-json, so the existing parser and the web's
+  execution record work unchanged.
+- **Identity.** The run uses the on-behalf-of token of the user whose request
+  started it (`DATABRICKS_HOST` / `DATABRICKS_TOKEN` in that child's env only;
+  never written to run metadata). Endpoint permissions, AI Gateway policies
+  and usage attribution therefore apply to that user. A run without a user
+  token fails with `DATABRICKS_AUTH_REQUIRED`; it never falls back to the app
+  service principal, whose credentials are stripped from every agent child's
+  env in this mode.
+- **Models.** `/api/agents` lists the ready `llm/v1/chat` endpoints the caller
+  can see as the agent's models. "Default" resolves to
+  `OD_DATABRICKS_DEFAULT_MODEL`, else `databricks-claude-sonnet-4-5`.
+- **Tools.** Write, Edit, Read, Glob, Grep and TodoWrite, confined to the run's
+  project directory. There is deliberately no shell, because all signed-in
+  users share one app container.
+- **Scopes.** The app needs the `model-serving` user API scope (plus
+  `iam.current-user:read` for identity). Users need CAN QUERY on the endpoints
+  they pick.
+- **Limits.** The user token is short-lived, so a run that outlives it fails
+  with a "send the message again" error. Skills that expect a shell (`od media
+  …` and similar) are unavailable to this agent.
+
 ## Building the bundle
 
 The daemon runs from built output, so build before deploying:
@@ -96,12 +130,13 @@ Then sync the repo root to the workspace and deploy it with
 sign-in entry points are disabled rather than deleted; their code goes in the
 cleanup wave.
 
+**AI wave:** see [AI (Model Serving)](#ai-model-serving).
+
 Not done yet, planned for later waves:
 
 - **Database**: Lakebase (Postgres) replacing SQLite / `better-sqlite3`.
-- **AI**: Model Serving / AI Gateway replacing the spawned agent CLIs and BYOK.
-  Runs that outlive their HTTP request (agent turns) will need their own
-  answer for the user's token, which is short-lived and request-scoped today.
+- **AI follow-ups**: remove the BYOK / external agent CLI paths, and refresh
+  the user token for runs longer than its lifetime.
 - **Storage**: UC Volumes for project artifacts.
 - **Cleanup**: telemetry (PostHog/Langfuse), media providers, Figma,
   Composio, `tools/pack` and the desktop launcher in `tools/dev`, and the

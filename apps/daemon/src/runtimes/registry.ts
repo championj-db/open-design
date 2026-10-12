@@ -25,6 +25,8 @@ import { codebuddyAgentDef } from './defs/codebuddy.js';
 import { reasonixAgentDef } from './defs/reasonix.js';
 import { mimoAgentDef } from './defs/mimo.js';
 import { atomcodeAgentDef } from './defs/atomcode.js';
+import { databricksAgentDef } from './defs/databricks.js';
+import { isDatabricksAuthMode } from '../databricks/auth-mode.js';
 import { readLocalAgentProfileDefs as readLocalAgentProfileDefsFromFile } from './local-profiles.js';
 import type { RuntimeAgentDef } from './types.js';
 
@@ -65,6 +67,8 @@ export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
   codebuddyAgentDef,
   mimoAgentDef,
   atomcodeAgentDef,
+  // Only meaningful with a signed-in Databricks user behind every run.
+  ...(isDatabricksAuthMode() ? [databricksAgentDef] : []),
 ];
 
 export function readLocalAgentProfileDefs(

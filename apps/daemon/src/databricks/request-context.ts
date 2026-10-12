@@ -19,3 +19,13 @@ export function bindDatabricksRequestContext(req: object, context: DatabricksReq
 export function databricksRequestContext(req: object): DatabricksRequestContext | null {
   return contexts.get(req) ?? null;
 }
+
+/**
+ * Let work a request starts (an agent run) act as that request's user for as
+ * long as the run object lives. The token stays in memory only; it is never
+ * copied into run metadata, so it is never persisted with the run.
+ */
+export function carryDatabricksRequestContext(from: object, to: object): void {
+  const context = contexts.get(from);
+  if (context) contexts.set(to, context);
+}

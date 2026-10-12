@@ -1434,9 +1434,15 @@ describe('applyDeploymentOverrides', () => {
     ).toEqual({ onboardingCompleted: true });
   });
 
-  it('reports onboarding as completed in Databricks auth mode', () => {
+  it('reports onboarding as completed and defaults the agent in Databricks auth mode', () => {
     expect(
       applyDeploymentOverrides({ onboardingCompleted: false }, { OD_AUTH_MODE: 'databricks' }),
+    ).toEqual({ onboardingCompleted: true, agentId: 'databricks' });
+    expect(
+      applyDeploymentOverrides({ agentId: 'claude' }, { OD_AUTH_MODE: 'databricks' }),
+    ).toEqual({ onboardingCompleted: true, agentId: 'claude' });
+    expect(
+      applyDeploymentOverrides({}, { OD_SKIP_ONBOARDING: '1' }),
     ).toEqual({ onboardingCompleted: true });
   });
 

@@ -1,4 +1,4 @@
-import type { Express, Response } from 'express';
+import type { Express, Request, Response } from 'express';
 import type Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -65,6 +65,7 @@ import {
   type SkillInstallErrorCode,
 } from '../services/skill-installation.js';
 import type { RouteDeps } from '../server-context.js';
+import type { DetectedAgent } from '../runtimes/types.js';
 import { findRealElementRange, HTML_TAG_PATTERNS } from '@open-design/contracts/runtime/html-injection-points';
 
 export interface RegisterAtomRoutesDeps {
@@ -85,6 +86,9 @@ export interface RegisterStaticResourceRoutesDeps extends RouteDeps<'db' | 'http
   /** Team-resource copy red-line (D3). When present, a frozen team skill cannot
    *  be edit-shadowed into a personal editable copy. Omit to skip (no-op). */
   teamResources?: TeamResourceStateProvider;
+  /** Per-caller view of a detected agent (e.g. the Databricks agent's models
+   *  are the endpoints that user can see). Omit to serve detection as-is. */
+  agentForRequest?: (agent: DetectedAgent, req: Request) => Promise<DetectedAgent>;
 }
 
 export function registerAtomRoutes(app: Express, ctx: RegisterAtomRoutesDeps) {
@@ -453,9 +457,11 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     }
     const agentCliEnv = config.agentCliEnv ?? {};
 
+    const forRequest = (agent: DetectedAgent) =>
+      ctx.agentForRequest ? ctx.agentForRequest(agent, req) : Promise.resolve(agent);
     if (!wantsStream) {
       try {
-        const list = await detectAgents(agentCliEnv);
+        const list = await Promise.all((await detectAgents(agentCliEnv)).map(forRequest));
         res.json({ agents: list });
       } catch (err: any) {
         res.status(500).json({ error: String(err) });
@@ -478,8 +484,9 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
       aborted = true;
     });
     try {
-      for await (const agent of detectAgentsStream(agentCliEnv)) {
+      for await (const detected of detectAgentsStream(agentCliEnv)) {
         if (aborted) break;
+        const agent = await forRequest(detected);
         res.write(`event: agent\ndata: ${JSON.stringify(agent)}\n\n`);
       }
       if (!aborted) {

@@ -24,6 +24,7 @@ import path from 'node:path';
 import type { OdNextRolloutMode } from '@open-design/contracts';
 
 import { isDatabricksAuthMode } from './databricks/auth-mode.js';
+import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
 import { expandHomePrefix } from './home-expansion.js';
 
 import {
@@ -764,15 +765,22 @@ function applyTelemetryDefaults(prefs: AppConfigPrefs): AppConfigPrefs {
 // Hosted deployments whose platform already authenticates every user never
 // show the web client's first-run sign-in / model-source flow. Databricks auth
 // mode implies this (the Apps proxy signs users in before any request reaches
-// the daemon); other platforms opt in with OD_SKIP_ONBOARDING=1. The override
-// is applied to what clients read, not persisted, so removing the env var
-// restores the saved preference.
+// the daemon); other platforms opt in with OD_SKIP_ONBOARDING=1. In Databricks
+// mode a user who has not picked an agent gets the workspace's Model Serving
+// agent, the one execution path that needs no local CLI. Overrides are
+// applied to what clients read, not persisted, so removing the env var
+// restores the saved preferences.
 export function applyDeploymentOverrides(
   prefs: AppConfigPrefs,
   env: NodeJS.ProcessEnv = process.env,
 ): AppConfigPrefs {
-  if (env.OD_SKIP_ONBOARDING !== '1' && !isDatabricksAuthMode(env)) return prefs;
-  return { ...prefs, onboardingCompleted: true };
+  const databricks = isDatabricksAuthMode(env);
+  if (env.OD_SKIP_ONBOARDING !== '1' && !databricks) return prefs;
+  return {
+    ...prefs,
+    onboardingCompleted: true,
+    ...(databricks && !prefs.agentId ? { agentId: DATABRICKS_AGENT_ID } : {}),
+  };
 }
 
 export async function readAppConfig(dataDir: string): Promise<AppConfigPrefs> {

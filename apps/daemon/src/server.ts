@@ -1214,6 +1214,9 @@ import {
   createExternalAuthDisabledMiddleware,
 } from './databricks/middleware.js';
 import { createDatabricksRuntimeFromEnv } from './databricks/runtime.js';
+import { databricksRequestContext } from './databricks/request-context.js';
+import { databricksAgentForRequest } from './databricks/agent-models.js';
+import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
 import { registerAuthSessionRoutes } from './routes/auth-session.js';
 import { createOpenDesignPublicMetadataService } from './services/open-design-public-metadata.js';
 import { createWhatsNewService } from './services/whats-new.js';
@@ -9029,6 +9032,9 @@ export async function startServer({
     verifyWorkspaceReadAuthority,
     verifyWorkspaceRequestAuthority,
     teamResources: collab.teamResources,
+    ...(databricksRuntime
+      ? { agentForRequest: (agent, req) => databricksAgentForRequest(databricksRuntime, agent, req) }
+      : {}),
     resources: {
       listAllSkills,
       listAllDesignTemplates,
@@ -11117,6 +11123,19 @@ export async function startServer({
       return failRun(
         'BYOK_PROVIDER_REQUIRED',
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+      );
+    }
+    // The Databricks agent acts as the user whose request started this run
+    // (carried onto the run by routes/runs.ts). Without that user's token it
+    // has no identity to call Model Serving with, and it never borrows the
+    // app service principal's.
+    const databricksRunUser = def.id === DATABRICKS_AGENT_ID && databricksRuntime
+      ? databricksRequestContext(run)
+      : null;
+    if (def.id === DATABRICKS_AGENT_ID && !databricksRunUser) {
+      return failRun(
+        'DATABRICKS_AUTH_REQUIRED',
+        'This run has no signed-in Databricks user. Reload OpenDesign and send the message again.',
       );
     }
     const requestedRuntimeModel = def.id === 'byok-opencode'
@@ -14398,6 +14417,12 @@ export async function startServer({
         ...(mmdRouteLaunchEnv || {}),
         ...odMediaEnv,
         ...(byokOpenCodeProvider ? byokOpenCodeProvider.env : {}),
+        ...(databricksRunUser && databricksRuntime
+          ? {
+              DATABRICKS_HOST: databricksRuntime.host,
+              DATABRICKS_TOKEN: databricksRunUser.accessToken,
+            }
+          : {}),
         ...await openDesignAmrTraceEnvForRun({
           agentId: def.id,
           runId: run.id,
@@ -14473,6 +14498,13 @@ export async function startServer({
           ? { OD_TASK_INPUT_DIR: odNextTaskInputSnapshot.projectionDir }
           : {}),
       }, agentLaunch);
+      if (databricksRuntime) {
+        // No agent child acts as the app itself: drop the service principal
+        // credentials Databricks Apps puts in the daemon's environment, so
+        // nothing a run executes can reach the workspace beyond its user.
+        delete env.DATABRICKS_CLIENT_ID;
+        delete env.DATABRICKS_CLIENT_SECRET;
+      }
       if (def.id === 'opencode' || def.id === 'byok-opencode') {
         try {
           const versions = await ensureDetectedRuntimeVersions('opencode', configuredAgentEnv);

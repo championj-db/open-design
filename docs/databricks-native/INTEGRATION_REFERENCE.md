@@ -55,6 +55,7 @@ Next.js export. All patterns below must be implemented in TS, not Python.
   `datetime('now')`→`now()`, boolean-as-int, `json` as TEXT vs native `jsonb`, `PRAGMA`, `.changes`/`lastInsertRowid`.
 
 ## 4. AI — Mosaic AI Gateway / Model Serving ("unity gateway") — replaces node-pty CLIs + BYOK + Vela/AMR
+> Implemented as the `databricks` agent (OpenAI-compatible chat completions, OBO); see `README.md` → AI. The Anthropic passthrough is retired on the au-pubsec workspace ("Use Unity Catalog model services").
 - Call Databricks serving endpoints with the **Databricks token** (OBO user token preferred, else SP). No vendor API keys.
 - Two usable surfaces (verify which the workspace exposes):
   - **Unified Chat Completions (provider-agnostic, preferred default):**
