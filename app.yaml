@@ -16,5 +16,5 @@ env:
     value: "1"
   - name: NODE_ENV
     value: "production"
-   - name: OD_ALLOWED_ORIGINS
-     value: "https://dbrx-open-design-1965859176160743.aws.databricksapps.com"
+  - name: OD_ALLOWED_ORIGINS
+    value: "https://dbrx-open-design-7474644518594480.aws.databricksapps.com,https://dbrx-open-design-1965859176160743.aws.databricksapps.com"
