@@ -27,6 +27,7 @@ Next.js export. All patterns below must be implemented in TS, not Python.
 - System env vars available in-app include the workspace host and the app's service-principal identity.
 
 ## 2. Authentication / On-Behalf-Of (OBO) — replaces OD_API_TOKEN + all external OAuth
+> Implemented (`OD_AUTH_MODE=databricks`, `apps/daemon/src/databricks/`); see `README.md` → Authentication.
 - Enable **user authorization (OBO)** on the app; select the **minimum** user API scopes needed.
 - Per request, read header **`X-Forwarded-Access-Token`** = short-lived OAuth token for the signed-in user.
   - **Fail closed** if absent (do NOT silently fall back to the app service principal for user actions).

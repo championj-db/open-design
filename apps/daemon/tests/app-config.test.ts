@@ -1434,6 +1434,12 @@ describe('applyDeploymentOverrides', () => {
     ).toEqual({ onboardingCompleted: true });
   });
 
+  it('reports onboarding as completed in Databricks auth mode', () => {
+    expect(
+      applyDeploymentOverrides({ onboardingCompleted: false }, { OD_AUTH_MODE: 'databricks' }),
+    ).toEqual({ onboardingCompleted: true });
+  });
+
   it('leaves the saved preference untouched otherwise', () => {
     expect(applyDeploymentOverrides({ onboardingCompleted: false }, {})).toEqual({
       onboardingCompleted: false,

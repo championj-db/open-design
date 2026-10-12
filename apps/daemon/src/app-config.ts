@@ -23,6 +23,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { OdNextRolloutMode } from '@open-design/contracts';
 
+import { isDatabricksAuthMode } from './databricks/auth-mode.js';
 import { expandHomePrefix } from './home-expansion.js';
 
 import {
@@ -760,17 +761,17 @@ function applyTelemetryDefaults(prefs: AppConfigPrefs): AppConfigPrefs {
   return prefs;
 }
 
-// Hosted deployments whose platform already authenticates every user (for
-// example Databricks Apps, where the Apps proxy signs users in before any
-// request reaches the daemon) set OD_SKIP_ONBOARDING=1 so the web client
-// never shows the first-run sign-in / model-source flow. The override is
-// applied to what clients read, not persisted, so removing the env var
+// Hosted deployments whose platform already authenticates every user never
+// show the web client's first-run sign-in / model-source flow. Databricks auth
+// mode implies this (the Apps proxy signs users in before any request reaches
+// the daemon); other platforms opt in with OD_SKIP_ONBOARDING=1. The override
+// is applied to what clients read, not persisted, so removing the env var
 // restores the saved preference.
 export function applyDeploymentOverrides(
   prefs: AppConfigPrefs,
   env: NodeJS.ProcessEnv = process.env,
 ): AppConfigPrefs {
-  if (env.OD_SKIP_ONBOARDING !== '1') return prefs;
+  if (env.OD_SKIP_ONBOARDING !== '1' && !isDatabricksAuthMode(env)) return prefs;
   return { ...prefs, onboardingCompleted: true };
 }
 

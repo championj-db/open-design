@@ -36,6 +36,7 @@ import {
   removeJsonInstall,
 } from './mcp-agent-install.js';
 import { resolveMcpWorkspaceContext } from './mcp-workspace-context.js';
+import { installDatabricksAppsBearerAuth } from './databricks/cli-bearer.js';
 
 const argv = process.argv.slice(2);
 
@@ -398,6 +399,7 @@ const SUBCOMMAND_MAP = {
   media: runMedia,
   mcp: runMcp,
   amr: runAmr,
+  auth: runAuth,
   collab: runCollab,
   'message-center': runMessageCenter,
   research: runResearch,
@@ -843,6 +845,9 @@ const first = argv.find((a) => !a.startsWith('-'));
 if (first && SUBCOMMAND_MAP[first]) {
   const idx = argv.indexOf(first);
   const rest = [...argv.slice(0, idx), ...argv.slice(idx + 1)];
+  // Client subcommands only: a daemon hosted as a Databricks App is reached
+  // through the Apps proxy, which needs the caller's Databricks token.
+  installDatabricksAppsBearerAuth();
   await SUBCOMMAND_MAP[first](rest);
   // Respect a non-zero exit code a handler set via process.exitCode (e.g. a
   // failed `od resource get`); default to 0 when it left it unset.
@@ -10182,6 +10187,53 @@ async function runVersion(args) {
     ? data.version
     : (data?.version?.version ?? JSON.stringify(data));
   console.log(version);
+}
+
+// `od auth whoami` — CLI mirror of the web shell's account identity. Prints
+// who the daemon says the caller is (GET /api/auth/session): the verified
+// Databricks user on a Databricks App deployment, or the local auth model.
+async function runAuth(args) {
+  if (args.length === 0 || args[0] === 'help' || args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  od auth whoami      Print who the daemon says you are.
+
+Common options:
+  --daemon-url <url>   OpenDesign daemon HTTP base. For a Databricks App, its
+                       https://<app>.databricksapps.com URL with DATABRICKS_TOKEN
+                       set to a Databricks OAuth token (for example from
+                       \`databricks auth token\`).
+  --json               Emit raw JSON.`);
+    process.exit(args.length === 0 ? 2 : 0);
+  }
+  const sub = args[0];
+  if (sub !== 'whoami') {
+    console.error(`unknown subcommand: od auth ${sub}`);
+    process.exit(2);
+  }
+  const flags = parseFlags(args.slice(1), { string: LIBRARY_STRING_FLAGS, boolean: LIBRARY_BOOLEAN_FLAGS });
+  const base = (await libraryDaemonUrl(flags)).replace(/\/$/, '');
+  let resp;
+  try {
+    resp = await fetch(`${base}/api/auth/session`);
+  } catch (err) {
+    return exitWithStructuredError({
+      code:    'daemon-not-running',
+      message: `Cannot reach daemon at ${base}: ${err?.message ?? err}`,
+    });
+  }
+  if (!resp.ok) return structuredHttpFailure(resp);
+  const data = await resp.json();
+  if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+  if (data?.provider !== 'databricks') {
+    console.log('Local daemon auth (no per-user identity).');
+    return;
+  }
+  if (!data.user) {
+    console.log('Databricks auth: no signed-in user on this request (in-container caller).');
+    return;
+  }
+  const name = data.user.displayName ? `${data.user.displayName} <${data.user.userName}>` : data.user.userName;
+  console.log(`Signed in with Databricks as ${name}`);
 }
 
 // `od whats-new` — CLI mirror of the home-surface post-update highlights

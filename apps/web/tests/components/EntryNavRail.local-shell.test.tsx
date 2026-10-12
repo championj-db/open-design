@@ -196,4 +196,15 @@ describe('EntryNavRail local (signed-out) shell', () => {
     fireEvent.click(screen.getByTestId('entry-nav-local-account'));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
+
+  it('names the platform-signed-in user in place of the local label', () => {
+    renderLocalRail({
+      footerNotice: null,
+      platformAccount: { name: 'Ada Lovelace', detail: 'ada@example.com' },
+    });
+    const identity = screen.getByTestId('entry-nav-local-account');
+    expect(identity.textContent).toBe('AAda Lovelace');
+    expect(identity.getAttribute('title')).toBe('ada@example.com');
+    expect(screen.queryByTestId('local-sign-in-card')).toBeNull();
+  });
 });

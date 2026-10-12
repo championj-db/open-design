@@ -1207,6 +1207,14 @@ import {
   isApiAuthDisabled,
   isApiTokenMiddlewareEnabled,
 } from './api-token-auth.js';
+import { resolveDaemonAuthMode } from './databricks/auth-mode.js';
+import { databricksAppOrigins } from './databricks/forwarded-headers.js';
+import {
+  createDatabricksAuthMiddleware,
+  createExternalAuthDisabledMiddleware,
+} from './databricks/middleware.js';
+import { createDatabricksRuntimeFromEnv } from './databricks/runtime.js';
+import { registerAuthSessionRoutes } from './routes/auth-session.js';
 import { createOpenDesignPublicMetadataService } from './services/open-design-public-metadata.js';
 import { createWhatsNewService } from './services/whats-new.js';
 import { execCommandViaLoginShell } from './services/login-shell.js';
@@ -3166,7 +3174,18 @@ export async function startServer({
   const apiTokenAuthEnabled = apiToken.length > 0 && !apiAuthDisabled;
   const isApiTokenAuthorization = (authorization: string | undefined): boolean =>
     apiTokenAuthEnabled && apiTokenAuthorizationMatches(authorization, apiToken);
-  if (!isLoopbackHostname(host) && apiToken.length === 0 && !apiAuthDisabled) {
+  // Databricks Apps deployments (OD_AUTH_MODE=databricks) authenticate every
+  // /api request with the user's forwarded on-behalf-of token instead; see
+  // databricks/middleware.ts. That mode replaces the token model, so mixing
+  // the two is a configuration error rather than something to reconcile.
+  const authMode = resolveDaemonAuthMode();
+  const databricksRuntime = authMode === 'databricks' ? createDatabricksRuntimeFromEnv() : null;
+  if (databricksRuntime && (apiToken.length > 0 || apiAuthDisabled)) {
+    throw new Error(
+      'OD_AUTH_MODE=databricks replaces OD_API_TOKEN and OD_DISABLE_API_AUTH; unset them.',
+    );
+  }
+  if (!isLoopbackHostname(host) && apiToken.length === 0 && !apiAuthDisabled && !databricksRuntime) {
     throw new Error(
       `OD_BIND_HOST=${host} requires OD_API_TOKEN to be set. ` +
       `Generate one with \`openssl rand -hex 32\` and re-launch. ` +
@@ -3234,26 +3253,25 @@ export async function startServer({
   // browser iframes can load HTML/CSS/JS without privileged headers.
   // Rich daemon status stays authenticated because it includes local
   // runtime paths.
+  const openProbePaths = new Set([
+    '/health',
+    '/api/health',
+    '/ready',
+    '/api/ready',
+    '/version',
+    '/api/version',
+  ]);
+  const isScopedPreviewAssetGet = (req: express.Request): boolean => {
+    if (req.method !== 'GET') return false;
+    const previewAsset = parseProjectPreviewAssetPath(req.path);
+    return Boolean(
+      previewAsset && projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope),
+    );
+  };
   if (apiTokenAuthEnabled) {
-    const openProbePaths = new Set([
-      '/health',
-      '/api/health',
-      '/ready',
-      '/api/ready',
-      '/version',
-      '/api/version',
-    ]);
     app.use('/api', (req, res, next) => {
       if (openProbePaths.has(req.path)) return next();
-      if (req.method === 'GET') {
-        const previewAsset = parseProjectPreviewAssetPath(req.path);
-        if (
-          previewAsset &&
-          projectPreviewScopes.validate(previewAsset.projectId, previewAsset.scope)
-        ) {
-          return next();
-        }
-      }
+      if (isScopedPreviewAssetGet(req)) return next();
       // Loopback short-circuit. We ignore the proxied X-Forwarded-For
       // header here because a reverse proxy MUST always forward the
       // credentials; the loopback bypass exists for the localhost desktop
@@ -3295,6 +3313,17 @@ export async function startServer({
         'OpenDesign authentication required. Use username "open-design" and OD_API_TOKEN as the password.',
       );
     });
+  }
+
+  if (databricksRuntime) {
+    app.use(
+      '/api',
+      createDatabricksAuthMiddleware({
+        identity: databricksRuntime.identity,
+        isOpenRequest: (req) => openProbePaths.has(req.path) || isScopedPreviewAssetGet(req),
+      }),
+    );
+    app.use(createExternalAuthDisabledMiddleware());
   }
 
   const designSystemServices = createDesignSystemServerServices({
@@ -3472,7 +3501,11 @@ export async function startServer({
     const ports = allowedBrowserPorts(resolvedPort);
     // Paired browser-extension origins are persisted in library_tokens and
     // seeded into this in-memory allowlist at boot / on pairing.
-    const allowedOrigins = [...extraAllowedOrigins, ...libraryExtensionAllowedOrigins()];
+    const allowedOrigins = [
+      ...extraAllowedOrigins,
+      ...libraryExtensionAllowedOrigins(),
+      ...databricksAppOrigins(req.headers),
+    ];
     if (!isAllowedBrowserOrigin(origin, req.headers.host, ports, host, allowedOrigins)) {
       if (req.method !== 'GET' || !isPortlessLoopbackOrigin(String(origin))) {
         return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
@@ -8232,6 +8265,8 @@ export async function startServer({
       version: versionInfo.version,
     });
   });
+
+  registerAuthSessionRoutes(app, { authMode });
 
   app.get('/api/version', async (_req, res) => {
     const version = await readCurrentAppVersionInfo();
