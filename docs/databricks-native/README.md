@@ -47,6 +47,10 @@ With `OD_AUTH_MODE=databricks` the daemon builds on that:
 - **Origins.** The proxy rewrites `Host`, so the daemon treats
   `https://<X-Forwarded-Host>` as the app's own origin. No `OD_ALLOWED_ORIGINS`
   entry is needed, and any other browser origin is still rejected.
+  The proxy's upstream `Host` is `localhost:<port>`, so the daemon's
+  isolated "powered" preview origin (a second loopback origin) is disabled in
+  this mode, and `/api/preview/isolation` reports `supported: false`. Without
+  that, every browser API call would be refused as a powered-preview request.
 - **External sign-in is disabled.** OpenDesign Cloud login, xAI OAuth, MCP
   server OAuth, connector OAuth, and agent CLI login entry points answer `403
   EXTERNAL_AUTH_DISABLED`.
