@@ -8246,6 +8246,12 @@ interface McpInstallInfo {
   cliExists: boolean;
   nodeExists: boolean;
   buildHint: string | null;
+  /** Present on a Databricks App: the snippet runs on the user's machine. */
+  databricksApp?: {
+    appUrl: string;
+    workspaceHost: string | null;
+    cliPathPlaceholder: string;
+  };
 }
 
 interface McpStdioServerConfig {
@@ -8733,7 +8739,9 @@ function IntegrationsSection() {
           <p style={{ margin: 0 }}>{client.buildInstruction(info)}</p>
         ) : null}
 
-        {client.id === 'codex' ? <CodexInstallToggle /> : null}
+        {/* One-click install shells out to `codex` on the daemon's machine,
+            which on a Databricks App is the app container, not the user's. */}
+        {client.id === 'codex' && !info?.databricksApp ? <CodexInstallToggle /> : null}
 
         {client.buildDeeplink && info ? (
           <div style={{ marginBottom: 12 }}>
@@ -8860,7 +8868,12 @@ function IntegrationsSection() {
         ) : null}
 
         <p className="mcp-running-note">
-          {t('settings.mcpRunningNote')}
+          {info?.databricksApp
+            ? t('settings.mcpDatabricksAppNote', {
+                path: info.databricksApp.cliPathPlaceholder,
+                host: info.databricksApp.workspaceHost ?? '<workspace-url>',
+              })
+            : t('settings.mcpRunningNote')}
         </p>
         </div>{/* end mcp-setup-card */}
       </div>

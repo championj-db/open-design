@@ -780,6 +780,7 @@ export const ja: Dict = {
   'settings.mcpCapabilityPull': 'デザインバンドルを1回の呼び出しで取得する: エントリファイルに加えて、参照されているすべてのCSS変数、コンポーネント、フォント。',
   'settings.mcpCapabilityDefault': 'OpenDesignで開いているプロジェクトとファイルをデフォルトにするため、どのデザインかを言い直すことなく「これを私のアプリで作って」と言えます。',
   'settings.mcpRunningNote': 'MCPツールの呼び出しを成功させるには、OpenDesignが実行中である必要があります。OpenDesignを開く前にコーディングAgentを起動した場合は、ライブデーモンに接続できるようAgentを再起動してください。',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'デザイン',
   'entry.tabTemplates': 'テンプレート',
   'entry.tabDesignSystems': 'デザインシステム',

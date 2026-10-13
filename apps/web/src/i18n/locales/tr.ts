@@ -780,6 +780,7 @@ export const tr: Dict = {
   'settings.mcpCapabilityPull': 'Tek bir çağrıyla bir tasarım paketi çekin: giriş dosyası ile birlikte referans verdiği her CSS değişkeni, bileşen ve yazı tipi.',
   'settings.mcpCapabilityDefault': 'OpenDesign\'da açık olan projeyi ve dosyayı varsayılan olarak kullanın; böylece hangi tasarım olduğunu yeniden belirtmeden "bunu uygulamamda oluştur" diyebilirsiniz.',
   'settings.mcpRunningNote': 'MCP araç çağrılarının başarılı olması için OpenDesign\'ın çalışıyor olması gerekir. Kodlama agent\'ınızı OpenDesign\'ı açmadan önce başlattıysanız, canlı daemon\'a ulaşabilmesi için agent\'ı yeniden başlatın.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'Tasarımlar',
   'entry.tabTemplates': 'Şablonlar',
   'entry.tabDesignSystems': 'Tasarım sistemleri',

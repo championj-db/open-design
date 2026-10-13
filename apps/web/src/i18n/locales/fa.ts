@@ -780,6 +780,7 @@ export const fa: Dict = {
   'settings.mcpCapabilityPull': 'دریافت یک بسته طراحی در یک فراخوانی: فایل ورودی به همراه هر متغیر CSS، کامپوننت و فونتی که به آن ارجاع می‌دهد.',
   'settings.mcpCapabilityDefault': 'به‌صورت پیش‌فرض از پروژه و فایلی که در OpenDesign باز کرده‌اید استفاده می‌کند، بنابراین می‌توانید بگویید «این را در اپ من بساز» بدون اینکه دوباره مشخص کنید کدام طراحی.',
   'settings.mcpRunningNote': 'برای موفقیت فراخوانی‌های ابزار MCP، OpenDesign باید در حال اجرا باشد. اگر Agent کدنویسی خود را پیش از باز کردن OpenDesign راه‌اندازی کرده‌اید، Agent را راه‌اندازی مجدد کنید تا بتواند به daemon زنده دسترسی پیدا کند.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'طرح‌ها',
   'entry.tabTemplates': 'قالب‌ها',
   'entry.tabDesignSystems': 'سیستم‌های طراحی',

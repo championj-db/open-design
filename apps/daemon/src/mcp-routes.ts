@@ -9,6 +9,9 @@ import { MCP_TEMPLATES, buildAcpMcpServers, buildClaudeMcpJson, isManagedProject
 import { beginAuth, exchangeCodeForToken, refreshAccessToken } from './mcp-oauth.js';
 import { clearToken, getToken, isTokenExpired, readAllTokens, setToken } from './mcp-tokens.js';
 import type { RouteDeps } from './server-context.js';
+import { databricksWorkspaceHost } from './databricks/auth-mode.js';
+import { databricksAppOrigins } from './databricks/forwarded-headers.js';
+import { databricksMcpInstallPayload } from './databricks/mcp-install-info.js';
 
 export interface RegisterMcpRoutesDeps extends RouteDeps<'http' | 'paths' | 'mcp'> {}
 
@@ -97,6 +100,16 @@ export function registerMcpRoutes(app: Express, ctx: RegisterMcpRoutesDeps) {
     if (!isLocalSameOrigin(req, getResolvedPort())) {
       return res.status(403).json({ error: 'cross-origin request rejected' });
     }
+    // Reached through the Databricks Apps proxy: the user's agent runs `od mcp`
+    // on their own machine against this app's public URL.
+    const [appUrl] = databricksAppOrigins(req.headers);
+    if (appUrl) {
+      return res.json(databricksMcpInstallPayload({
+        appUrl,
+        workspaceHost: databricksWorkspaceHost(),
+        userAgent: req.get('user-agent'),
+      }));
+    }
     const now = Date.now();
     const webPort = process.env[SIDECAR_ENV.WEB_PORT] ?? null;
     if (
@@ -116,6 +129,10 @@ export function registerMcpRoutes(app: Express, ctx: RegisterMcpRoutesDeps) {
   // ourselves — that way we inherit Codex's merge / validation rules
   // and only need to track its argv. See apps/daemon/src/codex-cli.ts.
   const CODEX_MCP_NAME = 'open-design';
+  // On a Databricks App `codex` would be the container's, not the user's; the
+  // user pastes the snippet into their own Codex config instead.
+  const CODEX_INSTALL_REMOTE_MESSAGE =
+    'One-click install is unavailable on a Databricks App; add the snippet to your own Codex config.';
 
   // Under a managed outer, keep this install's own Codex registration pointed
   // at the runtime that is running now. Registrations name a versioned
@@ -155,6 +172,9 @@ export function registerMcpRoutes(app: Express, ctx: RegisterMcpRoutesDeps) {
     if (!isLocalSameOrigin(req, getResolvedPort())) {
       return res.status(403).json({ error: 'cross-origin request rejected' });
     }
+    if (databricksAppOrigins(req.headers).length > 0) {
+      return sendApiError(res, 409, 'CODEX_INSTALL_REMOTE', CODEX_INSTALL_REMOTE_MESSAGE);
+    }
     const payload = computeInstallPayload();
     if (!payload.cliExists || !payload.nodeExists) {
       return sendApiError(res, 500, 'INSTALL_INFO_INCOMPLETE', payload.buildHint ?? 'install payload not ready');
@@ -175,6 +195,9 @@ export function registerMcpRoutes(app: Express, ctx: RegisterMcpRoutesDeps) {
   app.delete('/api/mcp/install/codex', async (req, res) => {
     if (!isLocalSameOrigin(req, getResolvedPort())) {
       return res.status(403).json({ error: 'cross-origin request rejected' });
+    }
+    if (databricksAppOrigins(req.headers).length > 0) {
+      return sendApiError(res, 409, 'CODEX_INSTALL_REMOTE', CODEX_INSTALL_REMOTE_MESSAGE);
     }
     try {
       await uninstallCodexMcp(CODEX_MCP_NAME);

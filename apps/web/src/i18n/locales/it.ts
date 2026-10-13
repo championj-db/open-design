@@ -780,6 +780,7 @@ export const it: Dict = {
   'settings.mcpCapabilityPull': 'Recuperare un bundle di design in una sola chiamata: il file di ingresso più ogni variabile CSS, componente e font a cui fa riferimento.',
   'settings.mcpCapabilityDefault': 'Utilizzare per impostazione predefinita il progetto e il file che hai aperto in OpenDesign, così puoi dire "build this in my app" senza dover ripetere quale design.',
   'settings.mcpRunningNote': 'OpenDesign deve essere in esecuzione affinché le chiamate agli strumenti MCP abbiano successo. Se hai avviato il tuo coding agent prima di aprire OpenDesign, riavvia l\'agent in modo che possa raggiungere il daemon attivo.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'Design',
   'entry.tabTemplates': 'Modelli',
   'entry.tabDesignSystems': 'Design system',

@@ -780,6 +780,7 @@ export const ko: Dict = {
   'settings.mcpCapabilityPull': '한 번의 호출로 디자인 번들을 가져옵니다: 진입 파일과 그것이 참조하는 모든 CSS 변수, 컴포넌트, 폰트까지 함께 가져옵니다.',
   'settings.mcpCapabilityDefault': 'OpenDesign에서 열려 있는 프로젝트와 파일을 기본값으로 사용하므로, 어떤 디자인인지 다시 말하지 않고도 "이걸 내 앱에 만들어 줘"라고 말할 수 있습니다.',
   'settings.mcpRunningNote': 'MCP 도구 호출이 성공하려면 OpenDesign이 실행 중이어야 합니다. OpenDesign을 열기 전에 코딩 Agent를 시작했다면, 실행 중인 데몬에 연결할 수 있도록 Agent를 다시 시작하세요.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': '디자인',
   'entry.tabTemplates': '템플릿',
   'entry.tabDesignSystems': '디자인 시스템',

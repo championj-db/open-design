@@ -785,6 +785,7 @@ export const zhTW: Dict = {
   "settings.mcpCapabilityDefault":
     "將目前在 OpenDesign 中開啟的專案與檔案作為脈絡。",
   "settings.mcpRunningNote": "請保持 OpenDesign 執行。設定完成後，重新啟動程式設計 agent。",
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   "entry.tabDesigns": "我的設計",
   "entry.tabTemplates": "範本",
   "entry.tabDesignSystems": "設計系統",

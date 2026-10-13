@@ -780,6 +780,7 @@ export const ar: Dict = {
   'settings.mcpCapabilityPull': 'سحب حزمة تصميم في استدعاء واحد: ملف الإدخال إضافةً إلى كل متغير CSS ومكوّن وخط يشير إليه.',
   'settings.mcpCapabilityDefault': 'الاعتماد افتراضيًا على المشروع والملف المفتوحَين في OpenDesign، حتى تتمكن من قول "ابنِ هذا في تطبيقي" دون إعادة تحديد التصميم المقصود.',
   'settings.mcpRunningNote': 'يجب أن يكون OpenDesign قيد التشغيل حتى تنجح استدعاءات أدوات MCP. إذا بدأت تشغيل وكيل البرمجة قبل فتح OpenDesign، فأعد تشغيل الـ Agent ليتمكن من الوصول إلى الـ daemon النشط.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'التصاميم',
   'entry.tabTemplates': 'قوالب',
   'entry.tabDesignSystems': 'أنظمة التصميم',

@@ -780,6 +780,7 @@ export const hu: Dict = {
   'settings.mcpCapabilityPull': 'Egy designcsomag lekérése egyetlen hívással: a belépési fájl, valamint minden CSS-változó, komponens és betűtípus, amelyre hivatkozik.',
   'settings.mcpCapabilityDefault': 'Alapértelmezésként az OpenDesignban éppen megnyitott projektet és fájlt használja, így mondhatod, hogy „építsd ezt meg az alkalmazásomban” anélkül, hogy újra meg kellene adnod, melyik designról van szó.',
   'settings.mcpRunningNote': 'Az OpenDesignnak futnia kell az MCP eszközhívások sikeréhez. Ha azelőtt indítottad el a kódoló Agentet, hogy megnyitottad volna az OpenDesignt, indítsd újra az Agentet, hogy elérje az élő daemont.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'Tervek',
   'entry.tabTemplates': 'Sablonok',
   'entry.tabDesignSystems': 'Designrendszerek',

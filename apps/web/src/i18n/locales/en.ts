@@ -780,6 +780,7 @@ export const en: Dict = {
   'settings.mcpCapabilityPull': 'Collect a design’s files, styles, components, and fonts as context.',
   'settings.mcpCapabilityDefault': 'Use the project and file currently open in OpenDesign as context.',
   'settings.mcpRunningNote': 'Keep OpenDesign running. Restart your coding agent after setup.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'Designs',
   'entry.tabTemplates': 'Templates',
   'entry.tabDesignSystems': 'Design systems',

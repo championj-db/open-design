@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { databricksWorkspaceHost, resolveDaemonAuthMode } from '../src/databricks/auth-mode.js';
-import { isDatabricksAppsUrl, withDatabricksAppsBearer } from '../src/databricks/cli-bearer.js';
+import {
+  databricksCliTokenSource,
+  isDatabricksAppsUrl,
+  withDatabricksAppsBearer,
+} from '../src/databricks/cli-bearer.js';
 import { databricksFetch, DatabricksUserTokenRequiredError } from '../src/databricks/client.js';
 import {
   cameThroughDatabricksAppsProxy,
@@ -247,6 +251,48 @@ describe('CLI Databricks Apps bearer', () => {
     expect(new Headers(calls[2]!.init.headers).get('authorization')).toBe('Bearer other');
     expect(new Headers(calls[3]!.init?.headers).get('authorization')).toBeNull();
     expect(isDatabricksAppsUrl('http://app-1.aws.databricksapps.com/')).toBe(false);
+  });
+
+  it('mints tokens from the Databricks CLI and mints again only near expiry', async () => {
+    let clock = Date.parse('2026-10-14T00:00:00Z');
+    const runs: string[][] = [];
+    const source = databricksCliTokenSource({ host: HOST }, async (args) => {
+      runs.push(args);
+      return JSON.stringify({
+        access_token: `token-${runs.length}`,
+        token_type: 'Bearer',
+        expiry: new Date(clock + 3_600_000).toISOString(),
+      });
+    }, () => clock);
+
+    const [first, concurrent] = await Promise.all([source(), source()]);
+    expect([first, concurrent]).toEqual(['token-1', 'token-1']);
+    expect(runs).toEqual([['auth', 'token', '--output', 'json', '--host', HOST]]);
+
+    clock += 3_600_000 - 30_000; // inside the last minute of the token's life
+    expect(await source()).toBe('token-2');
+    expect(runs).toHaveLength(2);
+  });
+
+  it('prefers a CLI profile and asks the source only for Databricks Apps requests', async () => {
+    const runs: string[][] = [];
+    const source = databricksCliTokenSource({ host: HOST, profile: 'au' }, async (args) => {
+      runs.push(args);
+      return JSON.stringify({ access_token: 'minted', expiry: '2099-01-01T00:00:00Z' });
+    });
+    const { calls, fetchImpl } = recordingFetch(() => jsonResponse(200, {}));
+    const wrapped = withDatabricksAppsBearer(fetchImpl, source);
+
+    await wrapped('http://127.0.0.1:7456/api/health');
+    expect(runs).toHaveLength(0);
+    await wrapped('https://app-1.aws.databricksapps.com/api/projects');
+    expect(new Headers(calls[1]!.init.headers).get('authorization')).toBe('Bearer minted');
+    expect(runs).toEqual([['auth', 'token', '--output', 'json', '--profile', 'au']]);
+  });
+
+  it('surfaces a CLI that returns no token', async () => {
+    const source = databricksCliTokenSource({ host: HOST }, async () => '{}');
+    await expect(source()).rejects.toThrow('returned no access_token');
   });
 });
 

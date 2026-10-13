@@ -780,6 +780,7 @@ export const uk: Dict = {
   'settings.mcpCapabilityPull': 'Отримати дизайн-набір одним викликом: вхідний файл плюс кожну CSS-змінну, компонент і шрифт, на які він посилається.',
   'settings.mcpCapabilityDefault': 'За замовчуванням використовувати проєкт і файл, відкриті у вас в OpenDesign, тож ви можете сказати «build this in my app», не уточнюючи, який саме дизайн.',
   'settings.mcpRunningNote': 'OpenDesign має бути запущено, щоб виклики інструментів MCP були успішними. Якщо ви запустили свого agent з кодування до відкриття OpenDesign, перезапустіть agent, щоб він міг зв’язатися з активним демоном.',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'Дизайни',
   'entry.tabTemplates': 'Шаблони',
   'entry.tabDesignSystems': 'Системи дизайну',
