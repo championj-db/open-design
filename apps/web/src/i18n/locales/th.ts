@@ -780,6 +780,7 @@ export const th: Dict = {
   'settings.mcpCapabilityPull': 'ดึงชุดดีไซน์ในการเรียกครั้งเดียว: ไฟล์เริ่มต้นพร้อมทุก CSS variable, คอมโพเนนต์ และฟอนต์ที่อ้างอิงถึง',
   'settings.mcpCapabilityDefault': 'ตั้งค่าเริ่มต้นเป็นโปรเจกต์และไฟล์ที่คุณเปิดอยู่ใน OpenDesign เพื่อให้คุณพูดได้ว่า "สร้างสิ่งนี้ในแอปของฉัน" โดยไม่ต้องระบุดีไซน์ซ้ำอีก',
   'settings.mcpRunningNote': 'OpenDesign ต้องกำลังทำงานอยู่เพื่อให้การเรียกเครื่องมือ MCP สำเร็จ หากคุณเริ่มต้นโค้ดดิ้ง Agent ก่อนเปิด OpenDesign ให้รีสตาร์ท Agent เพื่อให้สามารถเชื่อมต่อกับ daemon ที่ทำงานอยู่ได้',
+  'settings.mcpDatabricksAppNote': 'This app runs on Databricks, so the snippet runs OpenDesign\'s CLI on your own machine and connects to this app. Before pasting it: clone OpenDesign and run `pnpm install && pnpm --filter @open-design/daemon build`, replace `{path}` with that checkout\'s path, and sign in once with `databricks auth login --host {host}` (requires the Databricks CLI). If several CLI profiles point at this workspace, add `DATABRICKS_CONFIG_PROFILE` with the one to use to the snippet\'s env.',
   'entry.tabDesigns': 'ดีไซน์',
   'entry.tabTemplates': 'ตัวอย่าง',
   'entry.tabDesignSystems': 'ระบบการออกแบบ',

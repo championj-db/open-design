@@ -246,7 +246,11 @@ import {
 import { resolveByokModelPreference } from './byok/validation';
 import onboardingWelcomeStyles from './OnboardingWelcome.module.css';
 import { AmrActivationHintText } from './AmrActivationHintText';
-import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
+import {
+  cloudAccountSurfacesAllowed,
+  isPlatformManagedAuth,
+  useAuthSession,
+} from '../hooks/useAuthSession';
 
 // How long a cloud sign-in waits for the browser before offering to reopen it.
 const ACTIVATION_HINT_DELAY_MS = 5000;
@@ -708,6 +712,9 @@ export function EntryShell({
   // user, and nothing here may send them to the Cloud sign-in.
   const authSession = useAuthSession();
   const platformManagedAuth = isPlatformManagedAuth(authSession);
+  // Until the daemon names a local user, nothing here may offer or redirect to
+  // the Cloud sign-in either, so a Databricks page never flashes it on load.
+  const cloudAccountHidden = !cloudAccountSurfacesAllowed(authSession);
   const platformAccount = platformManagedAuth && authSession?.user
     ? {
         name: authSession.user.displayName ?? authSession.user.userName,
@@ -718,7 +725,7 @@ export function EntryShell({
     workspaceContextState,
     amrLoggedIn,
     amrSessionState,
-    platformManagedAuth,
+    cloudAccountHidden,
   );
   const railWorkspaceContext = accountFooterState === 'sign-in'
     ? null
@@ -726,7 +733,7 @@ export function EntryShell({
   const usesOpenDesignCloud = config.mode === 'daemon' && config.agentId === 'amr';
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE ?? null;
   const amrAuthRequired =
-    !platformManagedAuth
+    !cloudAccountHidden
     && (
       workspaceContextState.failure === 'reauth-required'
       || (
@@ -740,10 +747,10 @@ export function EntryShell({
     // Cloud identity gate. Passive reauthentication preserves the saved model
     // source and Home's locally persisted, not-yet-sent draft.
     const selectedCloudIdentityRejected =
-      !platformManagedAuth && usesOpenDesignCloud && amrLoggedIn === false;
+      !cloudAccountHidden && usesOpenDesignCloud && amrLoggedIn === false;
     if ((!selectedCloudIdentityRejected && !amrAuthRequired) || view === 'onboarding') return;
     navigate({ kind: 'home', view: 'onboarding' }, { replace: true });
-  }, [amrAuthRequired, amrLoggedIn, platformManagedAuth, usesOpenDesignCloud, view]);
+  }, [amrAuthRequired, amrLoggedIn, cloudAccountHidden, usesOpenDesignCloud, view]);
   let accountFooterNotice: ReactNode = null;
   if (accountFooterState === 'syncing') {
     accountFooterNotice = <RailAccountSyncTip />;

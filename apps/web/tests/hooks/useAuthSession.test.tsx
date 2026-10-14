@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { renderHook, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  cloudAccountSurfacesAllowed,
   fetchAuthSession,
   isAuthSessionResponse,
   isPlatformManagedAuth,
@@ -21,6 +22,11 @@ const DATABRICKS_SESSION = {
     groups: [],
   },
 } as const;
+
+// The shared setup seeds a local session; these tests exercise the read itself.
+beforeEach(() => {
+  resetAuthSessionForTests();
+});
 
 afterEach(() => {
   resetAuthSessionForTests();
@@ -65,6 +71,13 @@ describe('useAuthSession', () => {
     stubFetch([new Response('Not found', { status: 404 })]);
     expect(await fetchAuthSession()).toBeNull();
     expect(isPlatformManagedAuth(null)).toBe(false);
+  });
+
+  it('allows Cloud account surfaces only once the daemon names a local user', () => {
+    expect(cloudAccountSurfacesAllowed({ provider: 'local', user: null })).toBe(true);
+    expect(cloudAccountSurfacesAllowed({ provider: 'databricks', user: null })).toBe(false);
+    // Still loading (or unreadable): a Databricks page must not flash a sign-in.
+    expect(cloudAccountSurfacesAllowed(null)).toBe(false);
   });
 
   it('validates the response shape', () => {

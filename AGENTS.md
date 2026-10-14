@@ -116,6 +116,10 @@ Sanctioned exceptions:
   is not a second daemon data root.
 - `OD_LEGACY_DATA_DIR` is a migration source for legacy data import only. It is
   not an active daemon data root.
+- `OD_DATA_VOLUME` (Databricks Apps) names a Unity Catalog volume that holds a
+  mirror of the resolved daemon data root, restored at startup and synced while
+  the daemon runs (`apps/daemon/src/databricks/volume-mirror.ts`). It receives
+  `RUNTIME_DATA_DIR` explicitly and is not a second daemon data root.
 - External tool homes such as `CODEX_HOME` are integration inputs, not daemon
   data roots. The daemon must not describe them as OpenDesign runtime data.
 - Agent/project-cwd skill staging aliases are not daemon data roots.

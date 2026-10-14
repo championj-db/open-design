@@ -50,6 +50,15 @@ export interface McpInstallPayload {
   cliExists: boolean;
   nodeExists: boolean;
   buildHint: string | null;
+  /** Set when the daemon is a Databricks App: the snippet then runs `od mcp`
+   *  on the user's own machine against this app (see
+   *  `databricks/mcp-install-info.ts`), not the daemon's own runtime. */
+  databricksApp?: {
+    appUrl: string;
+    workspaceHost: string | null;
+    /** The snippet's stand-in for the CLI entry in the user's checkout. */
+    cliPathPlaceholder: string;
+  };
 }
 
 export function buildMcpInstallPayload(

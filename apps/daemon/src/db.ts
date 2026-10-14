@@ -2005,6 +2005,16 @@ export function getProject(db: SqliteDb, id: string) {
   return row ? normalizeProject(row) : null;
 }
 
+// Notified after every project insert, inside the inserting call's async
+// context, so a deployment can attribute the new project to whoever caused it
+// (databricks/project-ownership.ts).
+const projectInsertListeners = new Set<(projectId: string) => void>();
+
+export function onProjectInserted(listener: (projectId: string) => void): () => void {
+  projectInsertListeners.add(listener);
+  return () => projectInsertListeners.delete(listener);
+}
+
 export function insertProject(db: SqliteDb, p: DbRow) {
   db.prepare(
     `INSERT INTO projects
@@ -2022,6 +2032,7 @@ export function insertProject(db: SqliteDb, p: DbRow) {
     p.createdAt,
     p.updatedAt,
   );
+  for (const listener of projectInsertListeners) listener(String(p.id));
   return getProject(db, p.id);
 }
 

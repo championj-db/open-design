@@ -8,9 +8,10 @@ import path from 'node:path';
 //
 // Every path is confined to the run's project directory: relative paths
 // resolve against it, and an absolute path or a symlink that lands outside it
-// is refused. There is deliberately no shell tool — the app container is
+// is refused. There is deliberately no shell tool here — the app container is
 // shared by every signed-in user, so an agent gets file access to its own
-// project and nothing else.
+// project and nothing else. A shell, when enabled, runs in the user's own
+// Databricks Sandbox instead (sandbox.ts).
 
 export interface HarnessToolDefinition {
   type: 'function';

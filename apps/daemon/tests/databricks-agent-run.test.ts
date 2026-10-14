@@ -138,6 +138,8 @@ describe('Databricks agent runs', () => {
       { id: 'default', label: 'Default · Claude Sonnet 4.5' },
       { id: 'databricks-claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
     ]);
+    // OpenDesign Cloud needs its own sign-in, which a Databricks App refuses.
+    expect(agents.some((agent) => agent.id === 'amr')).toBe(false);
   });
 
   it('generates into the project as the user who started the run', async () => {

@@ -212,6 +212,7 @@ import {
   resolveAccentColor,
 } from '../state/appearance';
 import { isAutosaveDraftOnlyChange } from '../App';
+import { useCloudAccountSurfacesAllowed } from '../hooks/useAuthSession';
 import {
   FAILURE_SOUNDS,
   SUCCESS_SOUNDS,
@@ -1699,6 +1700,7 @@ export function SettingsDialog({
   const [amrCardStatus, setAmrCardStatus] = useState<VelaLoginStatus | null>(null);
   const [amrCardStatusReady, setAmrCardStatusReady] = useState(false);
   const amrCardSignedIn = isAmrSessionAuthenticated(amrCardStatus);
+  const cloudAccountSurfacesAllowed = useCloudAccountSurfacesAllowed();
   // Picking OpenDesign while signed out only selects it inside Settings:
   // writing `agentId: 'amr'` without a session trips App's "cloud identity
   // rejected" guard, which bounces the user to onboarding. The selected card
@@ -4527,7 +4529,7 @@ export function SettingsDialog({
                 </button>
               </div>
               </div>
-              {cfg.mode === 'daemon' && !amrCardSignedIn ? (
+              {cfg.mode === 'daemon' && !amrCardSignedIn && cloudAccountSurfacesAllowed ? (
                 // Only prompt to sign into OpenDesign Cloud when NOT already
                 // signed in — the AMR/vela session IS the cloud identity (one
                 // session drives both), so a logged-in user has nothing to do
@@ -8244,6 +8246,12 @@ interface McpInstallInfo {
   cliExists: boolean;
   nodeExists: boolean;
   buildHint: string | null;
+  /** Present on a Databricks App: the snippet runs on the user's machine. */
+  databricksApp?: {
+    appUrl: string;
+    workspaceHost: string | null;
+    cliPathPlaceholder: string;
+  };
 }
 
 interface McpStdioServerConfig {
@@ -8731,7 +8739,9 @@ function IntegrationsSection() {
           <p style={{ margin: 0 }}>{client.buildInstruction(info)}</p>
         ) : null}
 
-        {client.id === 'codex' ? <CodexInstallToggle /> : null}
+        {/* One-click install shells out to `codex` on the daemon's machine,
+            which on a Databricks App is the app container, not the user's. */}
+        {client.id === 'codex' && !info?.databricksApp ? <CodexInstallToggle /> : null}
 
         {client.buildDeeplink && info ? (
           <div style={{ marginBottom: 12 }}>
@@ -8858,7 +8868,12 @@ function IntegrationsSection() {
         ) : null}
 
         <p className="mcp-running-note">
-          {t('settings.mcpRunningNote')}
+          {info?.databricksApp
+            ? t('settings.mcpDatabricksAppNote', {
+                path: info.databricksApp.cliPathPlaceholder,
+                host: info.databricksApp.workspaceHost ?? '<workspace-url>',
+              })
+            : t('settings.mcpRunningNote')}
         </p>
         </div>{/* end mcp-setup-card */}
       </div>

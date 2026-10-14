@@ -1042,6 +1042,7 @@ export interface Dict {
   'settings.mcpCapabilityPull': string;
   'settings.mcpCapabilityDefault': string;
   'settings.mcpRunningNote': string;
+  'settings.mcpDatabricksAppNote': string;
 
   // Notifications (settings + system notifications)
   // `systemPrefs*` heads the System preferences block on Settings → General,

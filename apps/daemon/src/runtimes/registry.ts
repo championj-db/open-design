@@ -40,7 +40,9 @@ import type { RuntimeAgentDef } from './types.js';
  * `createLocalAgentDef`), so it is always an id we have never heard of.
  */
 export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
-  amrAgentDef,
+  // OpenDesign Cloud needs its own account; a Databricks App signs users in
+  // itself and refuses the Cloud sign-in, so it never offers the agent.
+  ...(isDatabricksAuthMode() ? [] : [amrAgentDef]),
   claudeAgentDef,
   codexAgentDef,
   devinAgentDef,

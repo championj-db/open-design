@@ -14,6 +14,7 @@ import { resetProjectCoverSnapshots } from '../../src/lib/project-cover-cache';
 import { resetThumbnailLoadGateForTests } from '../../src/lib/thumbnail-load-gate';
 import { resetSharedCancellableGet } from '../../src/lib/shared-cancellable-get';
 import { resetProjectRunStatusStore } from '../../src/hooks/useProjectRunStatuses';
+import { seedAuthSessionForTests } from '../../src/hooks/useAuthSession';
 
 beforeEach(() => {
   resetCoalescedGet();
@@ -34,4 +35,9 @@ beforeEach(() => {
   // its last answer at once; clear it so one test's statuses (or spent ✓s)
   // never seed the next.
   resetProjectRunStatusStore();
+  // A local daemon answers `/api/auth/session` as a local user, which is what
+  // lets the Cloud account surfaces show. Seed that answer so a test that does
+  // not stub the endpoint sees the local product; Databricks-mode tests seed
+  // or stub their own session.
+  seedAuthSessionForTests({ provider: 'local', user: null });
 });

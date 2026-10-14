@@ -24,6 +24,17 @@ describe('modelProviderIconSrc', () => {
     expect(modelProviderIconSrc('grok/grok-4')).toBe('/model-icons/x.svg');
   });
 
+  it('looks past the Databricks Foundation Model API endpoint prefix', () => {
+    expect(modelProviderIconSrc('databricks-claude-sonnet-4-5')).toBe('/agent-icons/claude.svg');
+    expect(modelProviderIconSrc('databricks-gpt-oss-120b')).toBe('/model-icons/openai.svg');
+    expect(modelProviderIconSrc('databricks-gemma-3-12b')).toBe('/model-icons/google-gemini.svg');
+    expect(modelProviderIconSrc('databricks-meta-llama-3-3-70b-instruct')).toBe(
+      '/model-icons/meta.png',
+    );
+    expect(modelProviderIconSrc('databricks-llama-4-maverick')).toBe('/model-icons/meta.png');
+    expect(modelProviderIconSrc('databricks-inkling')).toBeNull();
+  });
+
   it('returns null for ids with no provider prefix', () => {
     // The CLI-config default and other bare model ids carry no `provider/`
     // segment — callers must fall back to a neutral/agent mark themselves.

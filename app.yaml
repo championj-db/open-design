@@ -18,3 +18,16 @@ env:
     value: "databricks"
   - name: NODE_ENV
     value: "production"
+  # The container disk is wiped on every deploy, so the daemon data root is
+  # mirrored to this Unity Catalog volume: restored at startup, synced while
+  # running. `persistent_storage` is the app's volume resource key (Can read
+  # and write). The daemon refuses to start if the volume cannot be read.
+  - name: OD_DATA_VOLUME
+    valueFrom: persistent_storage
+  # Gives the Databricks agent a Bash tool in an ephemeral Databricks Sandbox
+  # (Beta), one per user conversation, owned by the app's service principal
+  # and deleted once idle. Needs the Sandbox preview in the workspace and
+  # sandbox access for the service principal; without them the agent keeps
+  # the file tools only.
+  - name: OD_DATABRICKS_SANDBOX
+    value: "1"

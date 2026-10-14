@@ -69,6 +69,26 @@ With `OD_AUTH_MODE=databricks` the daemon builds on that:
   least the `iam.current-user:read` user API scope. Add further scopes only as
   later waves need them.
 
+## Project visibility
+
+Every signed-in user shares one daemon, so projects are scoped per user
+(`apps/daemon/src/databricks/project-ownership.ts`):
+
+- **Ownership.** A project belongs to the Databricks user whose request created
+  it (recorded in the `databricks_project_owners` table, which persists with
+  the rest of the database through the volume mirror).
+- **Access.** Any `/api` request that names a project another user owns — in
+  its path, through a run id, or in a `projectId` / `projectIds` field — gets
+  `404 PROJECT_NOT_FOUND`. List responses drop other users' projects and the
+  runs and other items tied to them.
+- **Shared.** Design systems stay shared, including the project that backs
+  editing one; so do skills, templates and plugins.
+- **Not covered.** Projects created before ownership existed, or by background
+  work no user started (such as automations that create a new project), have
+  no owner and are hidden from every user. App-wide settings, memory, and the
+  legacy `/artifacts` export folder are not per-user. In-container callers
+  (agent tools on loopback) are not filtered.
+
 ## AI (Model Serving)
 
 Generation runs on the workspace's own models, as the signed-in user:
@@ -100,8 +120,68 @@ Generation runs on the workspace's own models, as the signed-in user:
   `iam.current-user:read` for identity). Users need CAN QUERY on the endpoints
   they pick.
 - **Limits.** The user token is short-lived, so a run that outlives it fails
-  with a "send the message again" error. Skills that expect a shell (`od media
-  …` and similar) are unavailable to this agent.
+  with a "send the message again" error. The OpenDesign CLI (`od media …`,
+  `od export …` and similar) is unavailable to this agent, with or without a
+  sandbox, so its prompt carries the direction library inline and steps that
+  need the CLI are skipped. For a general shell, see
+  [Sandbox shell](#sandbox-shell).
+
+## Sandbox shell
+
+With `OD_DATABRICKS_SANDBOX=1` (set in `app.yaml`), the Databricks agent gets a
+`Bash` tool that runs in a
+[Databricks Sandbox](https://docs.databricks.com/aws/en/compute/serverless/sandbox)
+(Beta), never in the shared app container.
+
+- **Owned by the app.** Databricks Apps has no `sandbox` user API scope, so the
+  daemon creates and drives sandboxes as the app's service principal
+  (`apps/daemon/src/databricks/sandbox-broker.ts`). The agent reaches its
+  sandbox only through the daemon (`POST /api/tools/databricks/sandbox/exec`)
+  with its run-scoped tool token; it never receives the service principal's
+  credentials, and sandboxes are created without Databricks credentials
+  inside.
+- **Ephemeral, one per conversation.** Each user conversation gets its own
+  sandbox under a random `od-session-…` name, created on its first command and
+  reused for the rest of that conversation. The daemon deletes it after 15
+  idle minutes and on shutdown; at startup it deletes any `od-session-…`
+  sandbox a previous daemon left behind. Installed packages do not outlive the
+  sandbox.
+- **Files.** Before each command the project is copied into
+  `/home/sandbox-agent/opendesign/projects/<project id>` (changed files only);
+  afterwards, files the command created, changed or deleted are applied back
+  to the project. `node_modules`, `.git` and similar trees are not copied, nor
+  files over 25 MB. The project in the daemon data root stays the only durable
+  copy, and it persists through the [UC volume mirror](#persistence-uc-volume).
+- **Requirements.** The workspace needs the Databricks Sandbox preview, and the
+  app's service principal must be able to create sandboxes. The daemon checks
+  at startup; if it cannot, the agent keeps the file tools only and the run
+  still works.
+- **Limits.** Sandbox egress is unrestricted. The OpenDesign CLI is not
+  installed there. Each command adds a few seconds of sync round trips, and a
+  single command times out after at most 280 seconds. Sandbox compute is
+  billed to the app's service principal, not to each user.
+
+## Persistence (UC Volume)
+
+The container disk is wiped on every deploy and restart. The daemon therefore
+mirrors its data root (the SQLite database, project files, and the rest of the
+daemon data described by the data directory contract in the root `AGENTS.md`)
+to a Unity Catalog volume:
+
+- **Setup.** Create a volume, add it to the app as a resource with **Can read
+  and write**, and point `OD_DATA_VOLUME` at its resource key in `app.yaml`
+  (`valueFrom: <key>`). Databricks grants the app's service principal access;
+  users need no grants on the volume.
+- **Startup.** Before anything reads the data root, the daemon restores it from
+  the volume. If the volume cannot be read, the daemon does not start: starting
+  empty would let the first sync overwrite the saved data.
+- **While running.** Every 30 seconds, files that changed are uploaded and a new
+  manifest is published after them; files deleted locally are then removed.
+  SQLite databases are uploaded as consistent snapshots, not raw files. Logs,
+  diagnostics, telemetry, caches and agent runtime homes are not mirrored.
+- **Shutdown.** A final sync runs after active runs stop.
+- **Limits.** A crash can lose up to 30 seconds of changes. The mirror assumes
+  one app instance; two instances would overwrite each other's manifest.
 
 ## Building the bundle
 
@@ -132,12 +212,15 @@ cleanup wave.
 
 **AI wave:** see [AI (Model Serving)](#ai-model-serving).
 
+**Persistence:** see [Persistence (UC Volume)](#persistence-uc-volume).
+
+**Sandbox:** see [Sandbox shell](#sandbox-shell).
+
 Not done yet, planned for later waves:
 
 - **Database**: Lakebase (Postgres) replacing SQLite / `better-sqlite3`.
 - **AI follow-ups**: remove the BYOK / external agent CLI paths, and refresh
   the user token for runs longer than its lifetime.
-- **Storage**: UC Volumes for project artifacts.
 - **Cleanup**: telemetry (PostHog/Langfuse), media providers, Figma,
   Composio, `tools/pack` and the desktop launcher in `tools/dev`, and the
   upstream desktop/Docker release workflows under `.github/`.

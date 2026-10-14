@@ -2,13 +2,20 @@
 // (e.g. `anthropic/claude-sonnet-4-5`) and bare catalog ids (e.g.
 // `claude-fable-5`, `deepseek-v4-flash`): the vendor token is the slash
 // prefix when present, otherwise the id's leading `-` token — the same
-// derivation the two-level picker's company grouping uses. Unknown vendors
-// return null and callers fall back to a neutral/agent mark instead of
-// inventing artwork.
+// derivation the two-level picker's company grouping uses. Databricks
+// Foundation Model API endpoints (`databricks-claude-sonnet-4-5`) carry a
+// platform prefix ahead of the vendor token, so it is stripped first. Unknown
+// vendors return null and callers fall back to a neutral/agent mark instead
+// of inventing artwork.
+const DATABRICKS_ENDPOINT_PREFIX = 'databricks-';
+
 export function modelProviderIconSrc(
   modelId: string | null | undefined,
 ): string | null {
   if (!modelId) return null;
+  if (modelId.startsWith(DATABRICKS_ENDPOINT_PREFIX)) {
+    modelId = modelId.slice(DATABRICKS_ENDPOINT_PREFIX.length);
+  }
   const slash = modelId.indexOf('/');
   const vendor = (
     slash > 0 ? modelId.slice(0, slash) : modelId.split('-')[0] ?? modelId
@@ -24,7 +31,11 @@ export function modelProviderIconSrc(
     vendor === 'o4'
   )
     return '/model-icons/openai.svg';
-  if (vendor.includes('google') || vendor.includes('gemini'))
+  if (
+    vendor.includes('google') ||
+    vendor.includes('gemini') ||
+    vendor.includes('gemma')
+  )
     return '/model-icons/google-gemini.svg';
   if (vendor.includes('xai') || vendor.includes('grok'))
     return '/model-icons/x.svg';

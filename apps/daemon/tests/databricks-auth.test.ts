@@ -221,6 +221,32 @@ describe('Databricks auth mode requests', () => {
     expect(res.status).toBe(403);
     expect(res.json.error.code).toBe('EXTERNAL_AUTH_DISABLED');
   });
+
+  it('hands out an MCP config that runs on the user\'s machine against this app', async () => {
+    const base = await startDatabricksDaemon();
+    const headers = proxied({
+      'x-forwarded-access-token': GOOD_TOKEN,
+      origin: APP_ORIGIN,
+      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+    });
+    const info = await request(`${base}/api/mcp/install-info`, { headers });
+    expect(info.status).toBe(200);
+    expect(info.json).toMatchObject({
+      command: 'node',
+      args: ['/path/to/open-design/apps/daemon/dist/cli.js', 'mcp', '--daemon-url', APP_ORIGIN],
+      env: { DATABRICKS_HOST: process.env.DATABRICKS_HOST },
+      daemonUrl: APP_ORIGIN,
+      platform: 'darwin',
+      databricksApp: { appUrl: APP_ORIGIN, workspaceHost: process.env.DATABRICKS_HOST },
+    });
+    // Nothing from the app container leaks into the snippet.
+    expect(JSON.stringify(info.json)).not.toContain(base);
+    expect(info.json.env.OD_DATA_DIR).toBeUndefined();
+
+    const codex = await request(`${base}/api/mcp/install/codex`, { method: 'POST', headers });
+    expect(codex.status).toBe(409);
+    expect(codex.json.error.code).toBe('CODEX_INSTALL_REMOTE');
+  });
 });
 
 describe('local auth mode', () => {

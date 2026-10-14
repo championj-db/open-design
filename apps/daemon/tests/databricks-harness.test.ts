@@ -157,6 +157,33 @@ describe('Databricks harness loop', () => {
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });
 
+  it('offers Bash only with a sandbox shell and routes its calls there', async () => {
+    const bodies: any[] = [];
+    const turns = [
+      sse([
+        toolChunk({ index: 0, id: 'toolu_b', type: 'function', function: { name: 'Bash', arguments: '{"command": "python3 build.py"}' } }),
+        finishChunk('tool_calls'),
+      ]),
+      sse([textChunk('Built.'), finishChunk('stop')]),
+    ];
+    const fetchImpl = (async (_input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return turns.shift()!;
+    }) as typeof fetch;
+    const commands: unknown[] = [];
+    const shell = {
+      async execute(input: Record<string, unknown>) {
+        commands.push(input.command);
+        return { content: 'ok', isError: false };
+      },
+    };
+    await runDatabricksHarness({ host: HOST, token: 't', model: 'm', projectDir, prompt: 'p', emit: () => {}, fetchImpl, shell });
+    expect(bodies[0].tools.map((t: any) => t.function.name)).toContain('Bash');
+    expect(bodies[0].messages[0].content).toContain('Bash tool runs commands in your own isolated sandbox');
+    expect(commands).toEqual(['python3 build.py']);
+    expect(bodies[1].messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'toolu_b', content: 'ok' });
+  });
+
   it('retries once without max_tokens when the endpoint rejects the request shape', async () => {
     const bodies: any[] = [];
     const responses = [
