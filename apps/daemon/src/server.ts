@@ -811,6 +811,7 @@ import {
   getWorkspaceResourceByResourceId,
   insertConversation,
   insertProject,
+  onProjectInserted,
   insertRoutine,
   insertRoutineRun,
   insertScheduledRoutineRun,
@@ -1218,6 +1219,12 @@ import { volumeMirrorFromEnv } from './databricks/volume-mirror.js';
 import { createSandboxApi, createSandboxBroker, registerSandboxToolRoutes, type SandboxBroker } from './databricks/sandbox-broker.js';
 import { SANDBOX_EXEC_TOOL_ENDPOINT, SANDBOX_EXEC_TOOL_OPERATION } from './databricks/sandbox.js';
 import { databricksRequestContext } from './databricks/request-context.js';
+import {
+  attributeNewProjects,
+  createProjectOwnership,
+  createProjectOwnershipMiddleware,
+  type ProjectOwnership,
+} from './databricks/project-ownership.js';
 import { databricksAgentForRequest } from './databricks/agent-models.js';
 import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
 import { registerAuthSessionRoutes } from './routes/auth-session.js';
@@ -3224,6 +3231,11 @@ export async function startServer({
   // behind; when the service principal cannot use sandboxes the broker stays
   // off and the agent keeps its file tools.
   let sandboxBroker: SandboxBroker | null = null;
+  let projectOwnership: ProjectOwnership | null = null;
+  const requireProjectOwnership = (): ProjectOwnership => {
+    if (!projectOwnership) throw new Error('project ownership is not initialized');
+    return projectOwnership;
+  };
   if (databricksRuntime?.servicePrincipal && (process.env.OD_DATABRICKS_SANDBOX ?? '').trim() === '1') {
     const servicePrincipal = databricksRuntime.servicePrincipal;
     const broker = createSandboxBroker({
@@ -3362,6 +3374,25 @@ export async function startServer({
       }),
     );
     app.use(createExternalAuthDisabledMiddleware());
+    // Each signed-in user reaches only the projects they created
+    // (databricks/project-ownership.ts). The database opens further down,
+    // before the server listens, so the lookups below are lazy.
+    app.use(
+      '/api',
+      createProjectOwnershipMiddleware({
+        ownership: {
+          ownerOf: (projectId) => requireProjectOwnership().ownerOf(projectId),
+          assign: (projectId, userId) => requireProjectOwnership().assign(projectId, userId),
+          visibleTo: (projectId, userId) => requireProjectOwnership().visibleTo(projectId, userId),
+        },
+        projectExists: (projectId) => getProject(db, projectId) !== null,
+        isSharedProject: (projectId) => getProject(db, projectId)?.metadata?.importedFrom === 'design-system',
+        projectIdForRun: (runId) => {
+          const projectId = design.runs.get(runId)?.projectId;
+          return typeof projectId === 'string' && projectId ? projectId : null;
+        },
+      }),
+    );
   }
 
   const designSystemServices = createDesignSystemServerServices({
@@ -3563,6 +3594,10 @@ export async function startServer({
     previousLogPath: resolveDaemonPreviousLogPath(runtime),
   });
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
+  if (databricksRuntime) {
+    projectOwnership = createProjectOwnership(db);
+    attributeNewProjects(projectOwnership, onProjectInserted);
+  }
   daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);
   const amrTerminalReportDelivery = createAmrTerminalReportDeliveryService({

@@ -69,6 +69,26 @@ With `OD_AUTH_MODE=databricks` the daemon builds on that:
   least the `iam.current-user:read` user API scope. Add further scopes only as
   later waves need them.
 
+## Project visibility
+
+Every signed-in user shares one daemon, so projects are scoped per user
+(`apps/daemon/src/databricks/project-ownership.ts`):
+
+- **Ownership.** A project belongs to the Databricks user whose request created
+  it (recorded in the `databricks_project_owners` table, which persists with
+  the rest of the database through the volume mirror).
+- **Access.** Any `/api` request that names a project another user owns — in
+  its path, through a run id, or in a `projectId` / `projectIds` field — gets
+  `404 PROJECT_NOT_FOUND`. List responses drop other users' projects and the
+  runs and other items tied to them.
+- **Shared.** Design systems stay shared, including the project that backs
+  editing one; so do skills, templates and plugins.
+- **Not covered.** Projects created before ownership existed, or by background
+  work no user started (such as automations that create a new project), have
+  no owner and are hidden from every user. App-wide settings, memory, and the
+  legacy `/artifacts` export folder are not per-user. In-container callers
+  (agent tools on loopback) are not filtered.
+
 ## AI (Model Serving)
 
 Generation runs on the workspace's own models, as the signed-in user:
