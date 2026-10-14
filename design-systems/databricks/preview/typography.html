@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Databricks typography</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=DM+Mono&display=swap" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <style>
+      body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); }
+      main { max-width: var(--container-max); margin: 0 auto; padding: var(--space-12) var(--container-gutter-desktop); }
+      .row { display: grid; grid-template-columns: 160px 1fr; gap: var(--space-6); align-items: baseline; padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
+      .label { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+      .head { font-family: var(--font-display); font-weight: 700; line-height: var(--leading-tight); letter-spacing: var(--tracking-display); margin: 0; }
+      p { margin: 0; line-height: var(--leading-body); }
+      code { font-family: var(--font-mono); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="row"><span class="label">56 · --text-4xl</span><p class="head" style="font-size: var(--text-4xl)">Data Intelligence Platform</p></div>
+      <div class="row"><span class="label">40 · --text-3xl</span><p class="head" style="font-size: var(--text-3xl)">Unify your data and AI</p></div>
+      <div class="row"><span class="label">32 · --text-2xl</span><p class="head" style="font-size: var(--text-2xl)">Govern everything with Unity Catalog</p></div>
+      <div class="row"><span class="label">24 · --text-xl</span><p class="head" style="font-size: var(--text-xl); font-weight: 500">Section subheader in DM Sans</p></div>
+      <div class="row"><span class="label">20 · --text-lg</span><p style="font-size: var(--text-lg); color: var(--muted)">Lead paragraph that sets up the story in one or two lines.</p></div>
+      <div class="row"><span class="label">16 · --text-base</span><p style="font-size: var(--text-base)">Body copy at 150% line height. Keep it short, direct and scannable.</p></div>
+      <div class="row"><span class="label">14 · --text-sm</span><p style="font-size: var(--text-sm)">Dense product UI text (adaptation).</p></div>
+      <div class="row"><span class="label">12 · --text-xs</span><p style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted)">Supporting text eyebrow</p></div>
+      <div class="row"><span class="label">DM Mono</span><p><code>SELECT * FROM main.sales.orders;</code></p></div>
+    </main>
+  </body>
+</html>

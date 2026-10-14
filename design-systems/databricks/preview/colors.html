@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Databricks colors</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=DM+Mono&display=swap" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <style>
+      body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); }
+      main { max-width: var(--container-max); margin: 0 auto; padding: var(--space-12) var(--container-gutter-desktop); }
+      h1 { margin: 0; font-size: var(--text-2xl); line-height: var(--leading-tight); }
+      h2 { margin: var(--space-8) 0 var(--space-4); font-size: var(--text-lg); }
+      .intro { margin: var(--space-2) 0 var(--space-6); color: var(--muted); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-4); }
+      .swatch { overflow: hidden; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--elev-ring); }
+      .color { height: 88px; background: var(--value); }
+      .meta { padding: var(--space-3); color: var(--muted); font-size: var(--text-sm); }
+      strong { display: block; color: var(--fg); font-weight: 500; }
+      code { font-family: var(--font-mono); font-size: var(--text-xs); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Databricks color roles</h1>
+      <p class="intro">Primary palette: Lava 600, Navy 800, Oat Medium, Oat Light and White. Accents are used sparingly.</p>
+      <section class="grid" aria-label="Primary and semantic colors">
+        <article class="swatch" style="--value: var(--accent)"><div class="color"></div><div class="meta"><strong>Lava 600</strong><code>--accent #FF3621</code></div></article>
+        <article class="swatch" style="--value: var(--fg)"><div class="color"></div><div class="meta"><strong>Navy 800</strong><code>--fg #1B3139</code></div></article>
+        <article class="swatch" style="--value: var(--surface-warm)"><div class="color"></div><div class="meta"><strong>Oat Medium</strong><code>--surface-warm #EEEDE9</code></div></article>
+        <article class="swatch" style="--value: var(--bg)"><div class="color"></div><div class="meta"><strong>Oat Light</strong><code>--bg #F9F7F4</code></div></article>
+        <article class="swatch" style="--value: var(--surface)"><div class="color"></div><div class="meta"><strong>White</strong><code>--surface #FFFFFF</code></div></article>
+        <article class="swatch" style="--value: var(--db-navy-900)"><div class="color"></div><div class="meta"><strong>Navy 900</strong><code>--db-navy-900 #0B2026</code></div></article>
+        <article class="swatch" style="--value: var(--db-lava-500)"><div class="color"></div><div class="meta"><strong>Lava 500</strong><code>--db-lava-500 #FF5F46</code></div></article>
+        <article class="swatch" style="--value: var(--danger)"><div class="color"></div><div class="meta"><strong>Maroon 600</strong><code>--danger #98102A</code></div></article>
+        <article class="swatch" style="--value: var(--warn)"><div class="color"></div><div class="meta"><strong>Yellow 600</strong><code>--warn #FFAB00</code></div></article>
+        <article class="swatch" style="--value: var(--success)"><div class="color"></div><div class="meta"><strong>Green 600</strong><code>--success #00A972</code></div></article>
+        <article class="swatch" style="--value: var(--db-blue-600)"><div class="color"></div><div class="meta"><strong>Blue 600</strong><code>--db-blue-600 #2272B4</code></div></article>
+        <article class="swatch" style="--value: var(--fg-2)"><div class="color"></div><div class="meta"><strong>Gray – Navigation</strong><code>--fg-2 #303F47</code></div></article>
+        <article class="swatch" style="--value: var(--muted)"><div class="color"></div><div class="meta"><strong>Gray – Text</strong><code>--muted #5A6F77</code></div></article>
+        <article class="swatch" style="--value: var(--border)"><div class="color"></div><div class="meta"><strong>Gray – Lines</strong><code>--border #DCE0E2</code></div></article>
+      </section>
+      <h2>Chart series order</h2>
+      <section class="grid" aria-label="Chart colors">
+        <article class="swatch" style="--value: var(--db-chart-1)"><div class="color"></div><div class="meta"><strong>1 · Navy 500</strong><code>--db-chart-1</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-2)"><div class="color"></div><div class="meta"><strong>2 · Lava 500</strong><code>--db-chart-2</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-3)"><div class="color"></div><div class="meta"><strong>3 · Yellow 500</strong><code>--db-chart-3</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-4)"><div class="color"></div><div class="meta"><strong>4 · Green 500</strong><code>--db-chart-4</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-5)"><div class="color"></div><div class="meta"><strong>5 · Maroon 500</strong><code>--db-chart-5</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-6)"><div class="color"></div><div class="meta"><strong>6 · Navy 300</strong><code>--db-chart-6</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-7)"><div class="color"></div><div class="meta"><strong>7 · Lava 400</strong><code>--db-chart-7</code></div></article>
+        <article class="swatch" style="--value: var(--db-chart-8)"><div class="color"></div><div class="meta"><strong>8 · Green 400</strong><code>--db-chart-8</code></div></article>
+      </section>
+    </main>
+  </body>
+</html>
