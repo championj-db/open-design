@@ -4,10 +4,11 @@
 // token in DATABRICKS_HOST / DATABRICKS_TOKEN. Output is Claude Code
 // stream-json on stdout; see harness-loop.ts.
 //
-// With OD_DATABRICKS_SANDBOX=1 and the user's SCIM id in
-// OD_DATABRICKS_USER_ID, the run also gets a Bash tool in that user's
-// Databricks Sandbox (sandbox.ts). A user who cannot use sandboxes (no
-// "sandbox" scope, preview off) keeps the file tools, so the run still works.
+// With OD_DATABRICKS_SANDBOX=1 (set by the daemon only when its sandbox
+// broker is up), the run also gets a Bash tool in this conversation's
+// ephemeral Databricks Sandbox, reached through the daemon with the run's
+// OD_TOOL_TOKEN (sandbox.ts, sandbox-broker.ts). Otherwise it keeps the file
+// tools only.
 
 import { databricksWorkspaceHost } from './auth-mode.js';
 import { runDatabricksHarness, type HarnessFrame } from './harness-loop.js';
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
     );
   }
   const prompt = await readStdin();
-  const shell = await sandboxShellFromEnv(process.env, host, token, process.cwd());
+  const shell = sandboxShellFromEnv(process.env, process.cwd());
   try {
     await runDatabricksHarness({
       shell,

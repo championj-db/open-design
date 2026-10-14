@@ -6,17 +6,15 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  createSandboxClient,
+  createDaemonSandboxClient,
   createSandboxShell,
+  SANDBOX_EXEC_TOOL_ENDPOINT,
   SANDBOX_PROJECTS_ROOT,
   SandboxUnavailableError,
-  sandboxIdForUser,
   sandboxShellFromEnv,
   type SandboxClient,
   type SandboxExecResult,
 } from '../src/databricks/sandbox.js';
-
-const HOST = 'https://ws.example.com';
 
 // A sandbox that is a temp directory on this machine: exec runs the real
 // bash/python sync scripts locally, with the sandbox projects root mapped
@@ -24,9 +22,6 @@ const HOST = 'https://ws.example.com';
 function localSandbox(remoteRoot: string) {
   const execs: string[] = [];
   const client: SandboxClient = {
-    sandboxId: 'opendesign-test',
-    async probe() {},
-    async ensureRunning() {},
     exec(script, args = [], timeoutMs = 60_000) {
       execs.push(script);
       const mapped = args.map((arg) => arg.split(SANDBOX_PROJECTS_ROOT).join(remoteRoot));
@@ -127,71 +122,36 @@ describe('sandbox shell', () => {
   });
 });
 
-describe('sandbox client', () => {
-  function api(states: Array<string | null>, { createStatus = 200 }: { createStatus?: number } = {}) {
-    const calls: string[] = [];
-    const fetchImpl = (async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
-      const url = String(input).replace(HOST, '');
-      calls.push(`${init.method} ${url}`);
-      expect(new Headers(init.headers).get('authorization')).toBe('Bearer user-token');
-      if (init.method === 'GET') {
-        const state = states.length > 1 ? states.shift()! : states[0]!;
-        return state === null
-          ? new Response('{}', { status: 404 })
-          : new Response(JSON.stringify({ status: { state } }), { status: 200 });
-      }
-      if (url.startsWith('/api/2.0/sandboxes?')) {
-        expect(JSON.parse(String(init.body))).toMatchObject({
-          spec: { identity: { databricks_access_token_included: false } },
-        });
-        return new Response('{}', { status: createStatus });
-      }
-      return new Response('{}', { status: 200 });
-    }) as typeof fetch;
-    return { calls, fetchImpl };
-  }
-
-  it('creates a missing sandbox and waits for it, without the user credentials inside', async () => {
-    const { calls, fetchImpl } = api([null, 'SANDBOX_STATE_PENDING', 'SANDBOX_STATE_RUNNING']);
-    const client = createSandboxClient({ host: HOST, token: 'user-token', sandboxId: 'opendesign-42', fetchImpl, sleep: async () => {} });
-    await client.ensureRunning();
-    expect(calls).toEqual([
-      'GET /api/2.0/sandboxes/opendesign-42',
-      'POST /api/2.0/sandboxes?sandbox_id=opendesign-42',
-      'GET /api/2.0/sandboxes/opendesign-42',
-      'GET /api/2.0/sandboxes/opendesign-42',
-    ]);
+describe('daemon sandbox client', () => {
+  it('sends each command to the daemon broker with the run tool token', async () => {
+    const requests: Array<{ url: string; auth: string | null; body: unknown }> = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      requests.push({ url, auth: new Headers(init.headers).get('authorization'), body: JSON.parse(String(init.body)) });
+      return new Response(JSON.stringify({ status: 'EXECUTE_COMMAND_STATUS_COMPLETED', exitCode: 0, stdout: 'hi', stderr: '', truncated: false }));
+    }) as unknown as typeof fetch;
+    const client = createDaemonSandboxClient({ daemonUrl: 'http://127.0.0.1:7456/', toolToken: 'odtt_x', fetchImpl });
+    expect((await client.exec('echo "$1"', ['hi'], 5_000)).stdout).toBe('hi');
+    expect(requests).toEqual([{
+      url: `http://127.0.0.1:7456${SANDBOX_EXEC_TOOL_ENDPOINT}`,
+      auth: 'Bearer odtt_x',
+      body: { script: 'echo "$1"', args: ['hi'], timeoutMs: 5_000 },
+    }]);
   });
 
-  it('starts a stopped sandbox', async () => {
-    const { calls, fetchImpl } = api(['SANDBOX_STATE_STOPPED', 'SANDBOX_STATE_RUNNING']);
-    const client = createSandboxClient({ host: HOST, token: 'user-token', sandboxId: 'opendesign-42', fetchImpl, sleep: async () => {} });
-    await client.ensureRunning();
-    expect(calls).toContain('POST /api/2.0/sandboxes/opendesign-42/start');
-  });
-
-  it('explains a missing scope or preview', async () => {
-    const fetchImpl = (async () => new Response('nope', { status: 403 })) as unknown as typeof fetch;
-    const client = createSandboxClient({ host: HOST, token: 'user-token', sandboxId: 'opendesign-42', fetchImpl });
-    await expect(client.probe()).rejects.toThrow(SandboxUnavailableError);
-    await expect(client.probe()).rejects.toThrow('"sandbox" user API scope');
-  });
-
-  it('names one sandbox per user', () => {
-    expect(sandboxIdForUser('6210746108732282')).toBe('opendesign-6210746108732282');
-    expect(sandboxIdForUser('A_b.C')).toBe('opendesign-a-b-c');
+  it('turns a daemon error into a sandbox error the model can read', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ error: { code: 'SANDBOX_UNAVAILABLE', message: 'no preview' } }), { status: 502 })) as unknown as typeof fetch;
+    const client = createDaemonSandboxClient({ daemonUrl: 'http://d', toolToken: 't', fetchImpl });
+    await expect(client.exec('true')).rejects.toThrow(SandboxUnavailableError);
+    await expect(client.exec('true')).rejects.toThrow('no preview');
   });
 });
 
 describe('sandbox shell from the run environment', () => {
-  const ok = (async () => new Response(JSON.stringify({ status: { state: 'SANDBOX_STATE_RUNNING' } }))) as unknown as typeof fetch;
-  it('is off unless enabled and given a user id', async () => {
-    expect(await sandboxShellFromEnv({}, HOST, 't', '/p', ok)).toBeNull();
-    expect(await sandboxShellFromEnv({ OD_DATABRICKS_SANDBOX: '1' }, HOST, 't', '/p', ok)).toBeNull();
-    expect(await sandboxShellFromEnv({ OD_DATABRICKS_SANDBOX: '1', OD_DATABRICKS_USER_ID: '42' }, HOST, 't', '/p', ok)).not.toBeNull();
-  });
-  it('falls back to no shell when the user cannot use sandboxes', async () => {
-    const denied = (async () => new Response('', { status: 403 })) as unknown as typeof fetch;
-    expect(await sandboxShellFromEnv({ OD_DATABRICKS_SANDBOX: '1', OD_DATABRICKS_USER_ID: '42' }, HOST, 't', '/p', denied)).toBeNull();
+  it('is on only when the daemon enabled it and gave the run a tool token', () => {
+    const base = { OD_DAEMON_URL: 'http://d', OD_TOOL_TOKEN: 't' };
+    expect(sandboxShellFromEnv({ ...base }, '/p')).toBeNull();
+    expect(sandboxShellFromEnv({ ...base, OD_DATABRICKS_SANDBOX: '0' }, '/p')).toBeNull();
+    expect(sandboxShellFromEnv({ OD_DATABRICKS_SANDBOX: '1', OD_DAEMON_URL: 'http://d' }, '/p')).toBeNull();
+    expect(sandboxShellFromEnv({ ...base, OD_DATABRICKS_SANDBOX: '1' }, '/p')).not.toBeNull();
   });
 });

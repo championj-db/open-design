@@ -4,12 +4,13 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 
 import { resolveInsideProject, type HarnessToolDefinition, type HarnessToolResult } from './harness-tools.js';
 
-// A shell for the Databricks agent, run in the signed-in user's own
-// Databricks Sandbox (serverless, isolated, Beta) instead of the app
-// container that every user shares. The harness drives it through the
-// Sandbox REST API with the user's on-behalf-of token, so each user gets one
-// sandbox — `opendesign-<scim id>`, reused across sessions, stopped by
-// Databricks when idle — that only they own and are billed for.
+// The Databricks agent's Bash tool, run in a Databricks Sandbox (serverless,
+// isolated, Beta) instead of the app container every user shares. Sandboxes
+// belong to the app's service principal and are brokered by the daemon
+// (sandbox-broker.ts): one ephemeral sandbox per user conversation, deleted
+// once idle. The harness reaches it only through the daemon, with its
+// run-scoped tool token, so it never holds the service principal's
+// credentials.
 //
 // The sandbox cannot see the app container's disk, so each Bash call brings
 // the project across and back:
@@ -20,15 +21,18 @@ import { resolveInsideProject, type HarnessToolDefinition, type HarnessToolResul
 //   3. pull: files the command created or changed come back into the project,
 //      and files it deleted are deleted locally.
 //
-// Both sides keep each file's mtime, so "differs" is a size + mtime compare
-// and an unchanged project costs two listings. Transfers are gzip+base64
-// carried in exec arguments and output, chunked under the API's limits.
+// The project in the daemon data root stays the only durable copy. Both sides
+// keep each file's mtime, so "differs" is a size + mtime compare and an
+// unchanged project costs two listings. Transfers are gzip+base64 carried in
+// exec arguments and output, chunked under the API's limits.
 
 export const SANDBOX_PROJECTS_ROOT = '/home/sandbox-agent/opendesign/projects';
-const INACTIVITY_TIMEOUT_SECONDS = 900;
-const START_TIMEOUT_MS = 180_000;
+export const SANDBOX_EXEC_TOOL_ENDPOINT = '/api/tools/databricks/sandbox/exec';
+export const SANDBOX_EXEC_TOOL_OPERATION = 'databricks-sandbox:exec';
 const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
-const MAX_COMMAND_TIMEOUT_MS = 600_000;
+// Each command crosses two HTTP hops (harness → daemon → Databricks) whose
+// clients give up waiting for response headers after 300 s.
+const MAX_COMMAND_TIMEOUT_MS = 280_000;
 // Linux caps one argument at 128 KiB, an exec request at 4 MiB, and the API
 // truncates output at 512 KiB.
 const ARG_CHUNK_CHARS = 96 * 1024;
@@ -46,9 +50,10 @@ export const BASH_TOOL: HarnessToolDefinition = {
   function: {
     name: 'Bash',
     description:
-      'Run a bash command in your own isolated Linux sandbox (Ubuntu, Python 3, Node 24, git). '
+      'Run a bash command in an isolated Linux sandbox (Ubuntu, Python 3, Node 24, git). '
       + 'The working directory is a copy of the project: files you create or change there are copied back into the project afterwards. '
-      + 'Installed packages persist between commands. Prefer the file tools for reading and editing project files.',
+      + 'Installed packages last for this conversation only; the sandbox is discarded when it goes idle. '
+      + 'Prefer the file tools for reading and editing project files.',
     parameters: {
       type: 'object',
       properties: {
@@ -77,110 +82,37 @@ export interface SandboxExecResult {
 }
 
 export interface SandboxClient {
-  readonly sandboxId: string;
-  /** Throws SandboxUnavailableError when this user cannot use sandboxes. */
-  probe(): Promise<void>;
-  /** Create or start the sandbox and wait until it is running. */
-  ensureRunning(): Promise<void>;
   /** `bash -c script` with positional `args` ($1, $2, …). */
   exec(script: string, args?: string[], timeoutMs?: number): Promise<SandboxExecResult>;
 }
 
-/** One sandbox per user: a stable, API-safe id derived from the SCIM id. */
-export function sandboxIdForUser(userId: string): string {
-  const safe = userId.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  if (safe === '') throw new SandboxUnavailableError('No user id to name a sandbox after.');
-  return `opendesign-${safe}`.slice(0, 63);
-}
-
-export function createSandboxClient({
-  host,
-  token,
-  sandboxId,
+/**
+ * The harness's sandbox: commands go to the daemon's broker, which picks this
+ * run's conversation sandbox from the tool token and creates it on first use.
+ */
+export function createDaemonSandboxClient({
+  daemonUrl,
+  toolToken,
   fetchImpl = fetch,
-  sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-  now = Date.now,
 }: {
-  host: string;
-  token: string;
-  sandboxId: string;
+  daemonUrl: string;
+  toolToken: string;
   fetchImpl?: typeof fetch;
-  sleep?: (ms: number) => Promise<unknown>;
-  now?: () => number;
 }): SandboxClient {
-  const base = host.replace(/\/+$/, '');
-  const name = `sandboxes/${sandboxId}`;
-  async function call(method: string, url: string, body?: unknown): Promise<Response> {
-    return fetchImpl(url, {
-      method,
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-  }
-  async function unavailable(response: Response, action: string): Promise<never> {
-    const detail = (await response.text().catch(() => '')).slice(0, 300);
-    if (response.status === 401 || response.status === 403) {
-      throw new SandboxUnavailableError(
-        `Databricks refused to ${action} (HTTP ${response.status}). The app needs the "sandbox" user API scope, `
-        + `and the workspace needs the Databricks Sandbox preview. ${detail}`.trim(),
-      );
-    }
-    throw new SandboxUnavailableError(`Could not ${action}: HTTP ${response.status}. ${detail}`.trim());
-  }
-  async function state(): Promise<string | null> {
-    const response = await call('GET', `${base}/api/2.0/${name}`);
-    if (response.status === 404) return null;
-    if (!response.ok) return unavailable(response, 'read your sandbox');
-    const body = (await response.json().catch(() => null)) as { status?: { state?: unknown } } | null;
-    return typeof body?.status?.state === 'string' ? body.status.state : 'SANDBOX_STATE_UNSPECIFIED';
-  }
+  const url = `${daemonUrl.replace(/\/+$/, '')}${SANDBOX_EXEC_TOOL_ENDPOINT}`;
   return {
-    sandboxId,
-    async probe() {
-      await state();
-    },
-    async ensureRunning() {
-      const deadline = now() + START_TIMEOUT_MS;
-      let current = await state();
-      if (current === null) {
-        const response = await call('POST', `${base}/api/2.0/sandboxes?sandbox_id=${encodeURIComponent(sandboxId)}`, {
-          display_name: 'OpenDesign',
-          // Commands come from a model; do not hand them the user's
-          // Databricks credentials as well.
-          spec: {
-            compute: { inactivity_timeout: `${INACTIVITY_TIMEOUT_SECONDS}s` },
-            identity: { databricks_access_token_included: false },
-          },
-        });
-        // A concurrent run may have created it first.
-        if (!response.ok && response.status !== 409) await unavailable(response, 'create your sandbox');
-        current = await state();
-      }
-      while (current !== 'SANDBOX_STATE_RUNNING') {
-        if (current === 'SANDBOX_STATE_STOPPED') {
-          const response = await call('POST', `${base}/api/2.0/${name}/start`);
-          if (!response.ok && response.status !== 409) await unavailable(response, 'start your sandbox');
-        }
-        if (now() > deadline) throw new SandboxUnavailableError('Your sandbox did not start within 3 minutes. Try again.');
-        await sleep(2_000);
-        current = await state();
-      }
-    },
     async exec(script, args = [], timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
-      const response = await call('POST', `${base}/api/2.0/sandbox-exec/${name}/exec-sync`, {
-        cmd: '/bin/bash',
-        args: ['-c', script, 'od', ...args],
-        execution_timeout: `${Math.ceil(timeoutMs / 1000)}s`,
+      const response = await fetchImpl(url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${toolToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ script, args, timeoutMs }),
       });
-      if (!response.ok) return unavailable(response, 'run a command in your sandbox');
-      const body = (await response.json()) as Record<string, unknown>;
-      return {
-        status: typeof body.status === 'string' ? body.status : 'EXECUTE_COMMAND_STATUS_UNSPECIFIED',
-        exitCode: typeof body.exit_code === 'number' ? body.exit_code : null,
-        stdout: typeof body.stdout === 'string' ? body.stdout : '',
-        stderr: typeof body.stderr === 'string' ? body.stderr : '',
-        truncated: body.truncated === true,
-      };
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: { message?: unknown } } | null;
+        const message = typeof body?.error?.message === 'string' ? body.error.message : `HTTP ${response.status}`;
+        throw new SandboxUnavailableError(`The sandbox is unavailable: ${message}`);
+      }
+      return (await response.json()) as SandboxExecResult;
     },
   };
 }
@@ -330,7 +262,6 @@ export function createSandboxShell({ client, projectDir }: { client: SandboxClie
         Math.max(1_000, typeof input.timeout === 'number' && Number.isFinite(input.timeout) ? input.timeout : DEFAULT_COMMAND_TIMEOUT_MS),
       );
       try {
-        await client.ensureRunning();
         const before = await push();
         const result = await client.exec(`cd "$1" && eval "$2"`, [remoteDir, command], timeoutMs);
         const synced = await pull(before);
@@ -392,23 +323,18 @@ function formatResult(
   return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated]` : text;
 }
 
-/** The user's sandbox shell for this run, or null when sandboxes are off or unavailable to them. */
-export async function sandboxShellFromEnv(
+/**
+ * The sandbox shell for this run, or null when the daemon has not enabled it
+ * (OD_DATABRICKS_SANDBOX=1 is set only when the broker is up).
+ */
+export function sandboxShellFromEnv(
   env: NodeJS.ProcessEnv,
-  host: string,
-  token: string,
   projectDir: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<ReturnType<typeof createSandboxShell> | null> {
+): ReturnType<typeof createSandboxShell> | null {
   if ((env.OD_DATABRICKS_SANDBOX ?? '').trim() !== '1') return null;
-  const userId = (env.OD_DATABRICKS_USER_ID ?? '').trim();
-  if (userId === '') return null;
-  try {
-    const client = createSandboxClient({ host, token, sandboxId: sandboxIdForUser(userId), fetchImpl });
-    await client.probe();
-    return createSandboxShell({ client, projectDir });
-  } catch (error) {
-    process.stderr.write(`[databricks-harness] sandbox unavailable, continuing without Bash: ${error instanceof Error ? error.message : String(error)}\n`);
-    return null;
-  }
+  const daemonUrl = (env.OD_DAEMON_URL ?? '').trim();
+  const toolToken = (env.OD_TOOL_TOKEN ?? '').trim();
+  if (daemonUrl === '' || toolToken === '') return null;
+  return createSandboxShell({ client: createDaemonSandboxClient({ daemonUrl, toolToken, fetchImpl }), projectDir });
 }

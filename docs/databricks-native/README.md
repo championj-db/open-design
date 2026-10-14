@@ -109,24 +109,37 @@ Generation runs on the workspace's own models, as the signed-in user:
 ## Sandbox shell
 
 With `OD_DATABRICKS_SANDBOX=1` (set in `app.yaml`), the Databricks agent gets a
-`Bash` tool that runs in the signed-in user's own
+`Bash` tool that runs in a
 [Databricks Sandbox](https://docs.databricks.com/aws/en/compute/serverless/sandbox)
 (Beta), never in the shared app container.
 
-- **One sandbox per user**, named `opendesign-<SCIM id>`, created on first use
-  with the user's on-behalf-of token, reused across sessions, and stopped by
-  Databricks after 15 idle minutes. It is created without the user's
-  Databricks credentials inside. Its home directory keeps installed packages.
+- **Owned by the app.** Databricks Apps has no `sandbox` user API scope, so the
+  daemon creates and drives sandboxes as the app's service principal
+  (`apps/daemon/src/databricks/sandbox-broker.ts`). The agent reaches its
+  sandbox only through the daemon (`POST /api/tools/databricks/sandbox/exec`)
+  with its run-scoped tool token; it never receives the service principal's
+  credentials, and sandboxes are created without Databricks credentials
+  inside.
+- **Ephemeral, one per conversation.** Each user conversation gets its own
+  sandbox under a random `od-session-…` name, created on its first command and
+  reused for the rest of that conversation. The daemon deletes it after 15
+  idle minutes and on shutdown; at startup it deletes any `od-session-…`
+  sandbox a previous daemon left behind. Installed packages do not outlive the
+  sandbox.
 - **Files.** Before each command the project is copied into
   `/home/sandbox-agent/opendesign/projects/<project id>` (changed files only);
   afterwards, files the command created, changed or deleted are applied back
   to the project. `node_modules`, `.git` and similar trees are not copied, nor
-  files over 25 MB. The project on the app stays the source of truth.
-- **Requirements.** The app needs the `sandbox` user API scope, and the
-  workspace needs the Databricks Sandbox preview. A user without them keeps the
-  file tools only; the run still works.
+  files over 25 MB. The project in the daemon data root stays the only durable
+  copy, and it persists through the [UC volume mirror](#persistence-uc-volume).
+- **Requirements.** The workspace needs the Databricks Sandbox preview, and the
+  app's service principal must be able to create sandboxes. The daemon checks
+  at startup; if it cannot, the agent keeps the file tools only and the run
+  still works.
 - **Limits.** Sandbox egress is unrestricted. The OpenDesign CLI is not
-  installed there. Each command adds a few seconds of sync round trips.
+  installed there. Each command adds a few seconds of sync round trips, and a
+  single command times out after at most 280 seconds. Sandbox compute is
+  billed to the app's service principal, not to each user.
 
 ## Persistence (UC Volume)
 

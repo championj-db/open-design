@@ -1215,6 +1215,8 @@ import {
 } from './databricks/middleware.js';
 import { createDatabricksRuntimeFromEnv } from './databricks/runtime.js';
 import { volumeMirrorFromEnv } from './databricks/volume-mirror.js';
+import { createSandboxApi, createSandboxBroker, registerSandboxToolRoutes, type SandboxBroker } from './databricks/sandbox-broker.js';
+import { SANDBOX_EXEC_TOOL_ENDPOINT, SANDBOX_EXEC_TOOL_OPERATION } from './databricks/sandbox.js';
 import { databricksRequestContext } from './databricks/request-context.js';
 import { databricksAgentForRequest } from './databricks/agent-models.js';
 import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
@@ -3214,6 +3216,20 @@ export async function startServer({
   if (volumeMirror) {
     await volumeMirror.restore();
     volumeMirror.start();
+  }
+
+  // The Databricks agent's Bash tool runs in ephemeral Databricks Sandboxes
+  // the app's service principal owns, one per user conversation
+  // (databricks/sandbox-broker.ts). init() deletes any a previous daemon left
+  // behind; when the service principal cannot use sandboxes the broker stays
+  // off and the agent keeps its file tools.
+  let sandboxBroker: SandboxBroker | null = null;
+  if (databricksRuntime?.servicePrincipal && (process.env.OD_DATABRICKS_SANDBOX ?? '').trim() === '1') {
+    const servicePrincipal = databricksRuntime.servicePrincipal;
+    const broker = createSandboxBroker({
+      api: createSandboxApi({ host: databricksRuntime.host, getToken: () => servicePrincipal.getAccessToken() }),
+    });
+    if (await broker.init()) sandboxBroker = broker;
   }
 
   // Agent CLIs a previous daemon spawned and never saw finish (it died without
@@ -9250,6 +9266,19 @@ export async function startServer({
       ).renderDependencyTouchedPaths;
     },
   });
+  if (sandboxBroker) {
+    registerSandboxToolRoutes(app, {
+      broker: sandboxBroker,
+      authorizeToolRequest: authDeps.authorizeToolRequest,
+      sendApiError: (res, status, code, message) => sendApiError(res, status, code, message),
+      sessionForRun: (runId) => {
+        const run = design.runs.get(runId);
+        const user = run ? databricksRequestContext(run)?.user : null;
+        const conversationId = typeof run?.conversationId === 'string' ? run.conversationId : '';
+        return user && conversationId ? { userId: user.id, conversationId } : null;
+      },
+    });
+  }
   registerDesignSystemToolRoutes(app, {
     auth: authDeps,
     http: httpDeps,
@@ -11392,8 +11421,12 @@ export async function startServer({
       ? toolTokenRegistry.mint({
           runId,
           projectId,
-          allowedEndpoints: CHAT_TOOL_ENDPOINTS,
-          allowedOperations: CHAT_TOOL_OPERATIONS,
+          allowedEndpoints: databricksRunUser && sandboxBroker
+            ? [...CHAT_TOOL_ENDPOINTS, SANDBOX_EXEC_TOOL_ENDPOINT]
+            : CHAT_TOOL_ENDPOINTS,
+          allowedOperations: databricksRunUser && sandboxBroker
+            ? [...CHAT_TOOL_OPERATIONS, SANDBOX_EXEC_TOOL_OPERATION]
+            : CHAT_TOOL_OPERATIONS,
           ttlMs: toolTokenTtlMs,
           ...(pluginGrantContext ?? {}),
         })
@@ -14440,9 +14473,9 @@ export async function startServer({
           ? {
               DATABRICKS_HOST: databricksRuntime.host,
               DATABRICKS_TOKEN: databricksRunUser.accessToken,
-              // Names the user's own sandbox when OD_DATABRICKS_SANDBOX=1
+              // Bash through the daemon's sandbox broker, only when it is up
               // (databricks/sandbox.ts).
-              OD_DATABRICKS_USER_ID: databricksRunUser.user.id,
+              OD_DATABRICKS_SANDBOX: sandboxBroker ? '1' : '0',
             }
           : {}),
         ...await openDesignAmrTraceEnvForRun({
@@ -18201,6 +18234,7 @@ export async function startServer({
       await terminalService.shutdownActive();
       await browserSessionService.shutdownActive();
       await design.analytics.shutdown();
+      await sandboxBroker?.stop();
       // Last, so the final sync carries everything the runs above wrote.
       await volumeMirror?.stop();
     };
