@@ -70,10 +70,16 @@ Next.js export. All patterns below must be implemented in TS, not Python.
   the daemon itself becomes the agent harness, running the chat/tool loop in-process and calling serving
   endpoints for model turns. (Still present until that wave lands — see `README.md` for current status.)
 
-## 5. Artifact storage (Wave 3) — Unity Catalog Volumes replaces local `.od/projects/`
-- Relational state → Lakebase; **files/artifacts → UC Volumes** via the existing `S3ProjectStorage` seam
-  (`apps/daemon/src/storage/project-storage.ts`, `OD_PROJECT_STORAGE=s3`). UC Volumes are reachable via the
-  Files API / `/Volumes/<catalog>/<schema>/<volume>/...` paths with the Databricks token.
+## 5. Persistence — the data root is mirrored to a Unity Catalog Volume
+- The Apps container disk is wiped on every deploy and restart. The daemon keeps working on local disk
+  (SQLite and the agents need POSIX files) and mirrors its whole resolved data root to a UC Volume through the
+  Files API, as the app's service principal: restored before startup reads the root, synced every 30 s, and
+  flushed on shutdown. Implementation: `apps/daemon/src/databricks/volume-mirror.ts`; configured by
+  `OD_DATA_VOLUME` (see `README.md` → Persistence).
+- This replaced the earlier plan of routing files through the `S3ProjectStorage` seam
+  (`apps/daemon/src/storage/project-storage.ts`): nothing calls that seam, and agents edit project files in
+  place, so it could not carry them. Lakebase for relational state remains an option if the app ever runs more
+  than one instance; the mirror assumes a single writer.
 
 ## 6. What gets removed (no external logins/services outside Databricks)
 Vela/AMR cloud (login, wallet, billing), xAI OAuth, MCP OAuth loopback servers, Composio + GitHub connectors,

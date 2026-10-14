@@ -103,6 +103,28 @@ Generation runs on the workspace's own models, as the signed-in user:
   with a "send the message again" error. Skills that expect a shell (`od media
   …` and similar) are unavailable to this agent.
 
+## Persistence (UC Volume)
+
+The container disk is wiped on every deploy and restart. The daemon therefore
+mirrors its data root (the SQLite database, project files, and the rest of the
+daemon data described by the data directory contract in the root `AGENTS.md`)
+to a Unity Catalog volume:
+
+- **Setup.** Create a volume, add it to the app as a resource with **Can read
+  and write**, and point `OD_DATA_VOLUME` at its resource key in `app.yaml`
+  (`valueFrom: <key>`). Databricks grants the app's service principal access;
+  users need no grants on the volume.
+- **Startup.** Before anything reads the data root, the daemon restores it from
+  the volume. If the volume cannot be read, the daemon does not start: starting
+  empty would let the first sync overwrite the saved data.
+- **While running.** Every 30 seconds, files that changed are uploaded and a new
+  manifest is published after them; files deleted locally are then removed.
+  SQLite databases are uploaded as consistent snapshots, not raw files. Logs,
+  diagnostics, telemetry, caches and agent runtime homes are not mirrored.
+- **Shutdown.** A final sync runs after active runs stop.
+- **Limits.** A crash can lose up to 30 seconds of changes. The mirror assumes
+  one app instance; two instances would overwrite each other's manifest.
+
 ## Building the bundle
 
 The daemon runs from built output, so build before deploying:
@@ -132,12 +154,13 @@ cleanup wave.
 
 **AI wave:** see [AI (Model Serving)](#ai-model-serving).
 
+**Persistence:** see [Persistence (UC Volume)](#persistence-uc-volume).
+
 Not done yet, planned for later waves:
 
 - **Database**: Lakebase (Postgres) replacing SQLite / `better-sqlite3`.
 - **AI follow-ups**: remove the BYOK / external agent CLI paths, and refresh
   the user token for runs longer than its lifetime.
-- **Storage**: UC Volumes for project artifacts.
 - **Cleanup**: telemetry (PostHog/Langfuse), media providers, Figma,
   Composio, `tools/pack` and the desktop launcher in `tools/dev`, and the
   upstream desktop/Docker release workflows under `.github/`.

@@ -1214,6 +1214,7 @@ import {
   createExternalAuthDisabledMiddleware,
 } from './databricks/middleware.js';
 import { createDatabricksRuntimeFromEnv } from './databricks/runtime.js';
+import { volumeMirrorFromEnv } from './databricks/volume-mirror.js';
 import { databricksRequestContext } from './databricks/request-context.js';
 import { databricksAgentForRequest } from './databricks/agent-models.js';
 import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
@@ -3195,6 +3196,24 @@ export async function startServer({
       `(Loopback hosts 127.0.0.1 / ::1 / localhost do not need a token.) ` +
       `Set OD_DISABLE_API_AUTH=1 only when a trusted reverse proxy already authenticates every request.`,
     );
+  }
+
+  // A Databricks App's disk is wiped on every deploy, so its data root is
+  // mirrored to a Unity Catalog volume (databricks/volume-mirror.ts). Restore
+  // runs before anything below reads the data root, and a failed restore stops
+  // startup rather than letting a sync publish an empty root over saved data.
+  const volumeMirror = databricksRuntime
+    ? volumeMirrorFromEnv({
+        dataDir: RUNTIME_DATA_DIR,
+        host: databricksRuntime.host,
+        getServicePrincipalToken: databricksRuntime.servicePrincipal
+          ? () => databricksRuntime.servicePrincipal!.getAccessToken()
+          : null,
+      })
+    : null;
+  if (volumeMirror) {
+    await volumeMirror.restore();
+    volumeMirror.start();
   }
 
   // Agent CLIs a previous daemon spawned and never saw finish (it died without
@@ -18179,6 +18198,8 @@ export async function startServer({
       await terminalService.shutdownActive();
       await browserSessionService.shutdownActive();
       await design.analytics.shutdown();
+      // Last, so the final sync carries everything the runs above wrote.
+      await volumeMirror?.stop();
     };
     let server;
     try {
