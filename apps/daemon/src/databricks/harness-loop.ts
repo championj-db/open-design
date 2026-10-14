@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { executeHarnessTool, HARNESS_TOOLS } from './harness-tools.js';
+import { executeHarnessTool, HARNESS_TOOLS, type HarnessToolDefinition, type HarnessToolResult } from './harness-tools.js';
+import { BASH_TOOL } from './sandbox.js';
 
 // The Databricks agent harness: OpenDesign's own chat/tool loop, run against
 // the workspace's Model Serving endpoints (OpenAI-compatible
@@ -28,6 +29,11 @@ export interface DatabricksHarnessOptions {
   /** The daemon-composed prompt (system instructions, history, user request). */
   prompt: string;
   imagePaths?: string[];
+  /**
+   * The user's sandbox shell (sandbox.ts). When present the model gets a Bash
+   * tool; when null it has file tools only.
+   */
+  shell?: { execute(input: Record<string, unknown>): Promise<HarnessToolResult> } | null;
   emit: (frame: HarnessFrame) => void;
   fetchImpl?: typeof fetch;
   maxTurns?: number;
@@ -61,13 +67,18 @@ interface ChatMessage {
   tool_call_id?: string;
 }
 
-function harnessEnvironmentNote(projectDir: string): string {
+function harnessEnvironmentNote(projectDir: string, hasShell: boolean): string {
   return [
     'You are running inside OpenDesign on Databricks, on behalf of the signed-in user.',
     `Your working directory is the project directory: ${projectDir}`,
     'Use the Write, Edit, Read, Glob, Grep and TodoWrite tools to inspect and create files there.',
     'Paths may be absolute inside that directory or relative to it.',
-    'There is no shell: you cannot run commands or install packages, so do the work with the file tools.',
+    hasShell
+      ? 'The Bash tool runs commands in your own isolated sandbox, in a copy of the project directory; files it creates or changes are copied back into the project. Use it for scripts, conversions and packages; keep using the file tools to read and edit project files.'
+      : 'There is no shell: you cannot run commands or install packages, so do the work with the file tools.',
+    // Neither environment has the OpenDesign CLI, so instructions that call it
+    // cannot be followed; say so once rather than let each one fail.
+    'The OpenDesign CLI ("$OD_NODE_BIN" "$OD_BIN" …, `od …`) is not available here. Skip any step that requires it, such as rendering a check image or generating media through it, and do not try to install it.',
   ].join('\n');
 }
 
@@ -82,7 +93,9 @@ export async function runDatabricksHarness(options: DatabricksHarnessOptions): P
     fetchImpl = fetch,
     maxTurns = DEFAULT_MAX_TURNS,
     now = Date.now,
+    shell = null,
   } = options;
+  const tools: HarnessToolDefinition[] = shell ? [...HARNESS_TOOLS, BASH_TOOL] : HARNESS_TOOLS;
   const startedAt = now();
   const sessionId = randomUUID();
   const usage = { input_tokens: 0, output_tokens: 0 };
@@ -94,11 +107,11 @@ export async function runDatabricksHarness(options: DatabricksHarnessOptions): P
     session_id: sessionId,
     model,
     cwd: projectDir,
-    tools: HARNESS_TOOLS.map((entry) => entry.function.name),
+    tools: tools.map((entry) => entry.function.name),
   });
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: harnessEnvironmentNote(projectDir) },
+    { role: 'system', content: harnessEnvironmentNote(projectDir, shell !== null) },
     { role: 'user', content: await userContent(prompt, options.imagePaths ?? []) },
   ];
   let finalText = '';
@@ -107,13 +120,13 @@ export async function runDatabricksHarness(options: DatabricksHarnessOptions): P
     const messageId = `msg_${sessionId.replace(/-/g, '').slice(0, 16)}_${turn}`;
     emit(streamEvent(sessionId, { type: 'message_start', message: { id: messageId, role: 'assistant', model, content: [] } }));
 
-    let response = await requestCompletion(fetchImpl, host, token, model, messages, maxTokens);
+    let response = await requestCompletion(fetchImpl, host, token, model, messages, maxTokens, tools);
     if (response.status === 400 && maxTokens !== null) {
       // Some endpoints cap output below our default; retry once with the
       // endpoint's own limit rather than failing the turn.
       await response.text().catch(() => '');
       maxTokens = null;
-      response = await requestCompletion(fetchImpl, host, token, model, messages, maxTokens);
+      response = await requestCompletion(fetchImpl, host, token, model, messages, maxTokens, tools);
     }
     await assertOk(response, model);
 
@@ -242,7 +255,9 @@ export async function runDatabricksHarness(options: DatabricksHarnessOptions): P
       const parsed = parsedInputs[offset]!;
       const result = parsed.error
         ? { content: `Error: ${parsed.error}`, isError: true }
-        : await executeHarnessTool(projectDir, call.name, parsed.input);
+        : call.name === 'Bash' && shell
+          ? await shell.execute(parsed.input)
+          : await executeHarnessTool(projectDir, call.name, parsed.input);
       results.push({ type: 'tool_result', tool_use_id: call.id, content: result.content, is_error: result.isError });
       messages.push({ role: 'tool', tool_call_id: call.id, content: result.content });
     }
@@ -259,6 +274,7 @@ function requestCompletion(
   model: string,
   messages: ChatMessage[],
   maxTokens: number | null,
+  tools: HarnessToolDefinition[],
 ): Promise<Response> {
   return fetchImpl(`${host}/serving-endpoints/chat/completions`, {
     method: 'POST',
@@ -270,7 +286,7 @@ function requestCompletion(
     body: JSON.stringify({
       model,
       messages,
-      tools: HARNESS_TOOLS,
+      tools,
       stream: true,
       ...(maxTokens !== null ? { max_tokens: maxTokens } : {}),
     }),

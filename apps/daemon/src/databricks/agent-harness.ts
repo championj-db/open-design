@@ -3,9 +3,15 @@
 // directory as cwd, and the signed-in user's workspace host and on-behalf-of
 // token in DATABRICKS_HOST / DATABRICKS_TOKEN. Output is Claude Code
 // stream-json on stdout; see harness-loop.ts.
+//
+// With OD_DATABRICKS_SANDBOX=1 and the user's SCIM id in
+// OD_DATABRICKS_USER_ID, the run also gets a Bash tool in that user's
+// Databricks Sandbox (sandbox.ts). A user who cannot use sandboxes (no
+// "sandbox" scope, preview off) keeps the file tools, so the run still works.
 
 import { databricksWorkspaceHost } from './auth-mode.js';
 import { runDatabricksHarness, type HarnessFrame } from './harness-loop.js';
+import { sandboxShellFromEnv } from './sandbox.js';
 import { resolveDatabricksChatModel } from './serving-endpoints.js';
 
 export interface HarnessArgs {
@@ -59,8 +65,10 @@ async function main(): Promise<void> {
     );
   }
   const prompt = await readStdin();
+  const shell = await sandboxShellFromEnv(process.env, host, token, process.cwd());
   try {
     await runDatabricksHarness({
+      shell,
       host,
       token,
       model: resolveDatabricksChatModel(args.model),

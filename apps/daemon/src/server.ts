@@ -14440,6 +14440,9 @@ export async function startServer({
           ? {
               DATABRICKS_HOST: databricksRuntime.host,
               DATABRICKS_TOKEN: databricksRunUser.accessToken,
+              // Names the user's own sandbox when OD_DATABRICKS_SANDBOX=1
+              // (databricks/sandbox.ts).
+              OD_DATABRICKS_USER_ID: databricksRunUser.user.id,
             }
           : {}),
         ...await openDesignAmrTraceEnvForRun({

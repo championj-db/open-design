@@ -100,8 +100,33 @@ Generation runs on the workspace's own models, as the signed-in user:
   `iam.current-user:read` for identity). Users need CAN QUERY on the endpoints
   they pick.
 - **Limits.** The user token is short-lived, so a run that outlives it fails
-  with a "send the message again" error. Skills that expect a shell (`od media
-  …` and similar) are unavailable to this agent.
+  with a "send the message again" error. The OpenDesign CLI (`od media …`,
+  `od export …` and similar) is unavailable to this agent, with or without a
+  sandbox, so its prompt carries the direction library inline and steps that
+  need the CLI are skipped. For a general shell, see
+  [Sandbox shell](#sandbox-shell).
+
+## Sandbox shell
+
+With `OD_DATABRICKS_SANDBOX=1` (set in `app.yaml`), the Databricks agent gets a
+`Bash` tool that runs in the signed-in user's own
+[Databricks Sandbox](https://docs.databricks.com/aws/en/compute/serverless/sandbox)
+(Beta), never in the shared app container.
+
+- **One sandbox per user**, named `opendesign-<SCIM id>`, created on first use
+  with the user's on-behalf-of token, reused across sessions, and stopped by
+  Databricks after 15 idle minutes. It is created without the user's
+  Databricks credentials inside. Its home directory keeps installed packages.
+- **Files.** Before each command the project is copied into
+  `/home/sandbox-agent/opendesign/projects/<project id>` (changed files only);
+  afterwards, files the command created, changed or deleted are applied back
+  to the project. `node_modules`, `.git` and similar trees are not copied, nor
+  files over 25 MB. The project on the app stays the source of truth.
+- **Requirements.** The app needs the `sandbox` user API scope, and the
+  workspace needs the Databricks Sandbox preview. A user without them keeps the
+  file tools only; the run still works.
+- **Limits.** Sandbox egress is unrestricted. The OpenDesign CLI is not
+  installed there. Each command adds a few seconds of sync round trips.
 
 ## Persistence (UC Volume)
 
@@ -155,6 +180,8 @@ cleanup wave.
 **AI wave:** see [AI (Model Serving)](#ai-model-serving).
 
 **Persistence:** see [Persistence (UC Volume)](#persistence-uc-volume).
+
+**Sandbox:** see [Sandbox shell](#sandbox-shell).
 
 Not done yet, planned for later waves:
 

@@ -24,3 +24,9 @@ env:
   # and write). The daemon refuses to start if the volume cannot be read.
   - name: OD_DATA_VOLUME
     valueFrom: persistent_storage
+  # Gives the Databricks agent a Bash tool in each signed-in user's own
+  # Databricks Sandbox (Beta). Needs the "sandbox" user API scope on the app
+  # and the Databricks Sandbox preview in the workspace; users without them
+  # keep the file tools only.
+  - name: OD_DATABRICKS_SANDBOX
+    value: "1"

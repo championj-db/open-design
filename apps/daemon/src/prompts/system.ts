@@ -38,6 +38,7 @@ import {
   SLIM_V2_ROLE_BOUNDARY_GUARD,
 } from './core-slim.js';
 import { renderDirectionIndexBlock, renderDirectionSpecBlock } from './directions.js';
+import { DATABRICKS_AGENT_ID } from '../runtimes/defs/databricks.js';
 import { renderDeckFrameworkDirective } from './deck-framework.js';
 import {
   MEDIA_USER_REPLY_CONTRACT,
@@ -1150,7 +1151,12 @@ export function composeSystemPrompt({
       // tools to dereference the index, so they keep the full inline library
       // like classic; anything less tells them to bind palettes they cannot
       // fetch. Classic keeps the inline full library everywhere.
-      const canPullDirections = resolvedExecutionProfile !== 'text_artifact';
+      //
+      // The Databricks agent writes files but has no OpenDesign CLI (its
+      // optional sandbox shell runs outside the daemon's reach), so it is in
+      // the same position as text_artifact runs here.
+      const canPullDirections = resolvedExecutionProfile !== 'text_artifact'
+        && agentId !== DATABRICKS_AGENT_ID;
       parts.push(
         isSlimCore && canPullDirections
           ? renderDirectionIndexBlock()
