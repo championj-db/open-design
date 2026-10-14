@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "od-design-system-project/v1",
+  "id": "databricks",
+  "name": "Databricks",
+  "category": "Developer Tools",
+  "description": "The Databricks brand: Lava 600 red and Navy 800 on Oat and White neutrals, DM Sans and DM Mono, an 8-point grid, brand chart colors, and direct, clear copy.",
+  "source": {
+    "type": "bundled",
+    "origin": "OpenDesign curated package from the Databricks 2025 corporate brand palette and Extended Brand Guidelines (https://brandguides.brandfolder.com/databricks-extended-brand-guidelines)"
+  },
+  "files": {
+    "design": "DESIGN.md",
+    "tokens": "tokens.css",
+    "components": "components.html"
+  },
+  "usage": "USAGE.md",
+  "componentsManifest": "components.manifest.json",
+  "importMode": "normalized",
+  "craft": {
+    "applies": [],
+    "suggested": [
+      "color",
+      "accessibility-baseline"
+    ],
+    "exemptions": []
+  },
+  "preview": {
+    "dir": "preview",
+    "pages": [
+      {
+        "path": "preview/colors.html",
+        "role": "colors",
+        "title": "Colors"
+      },
+      {
+        "path": "preview/typography.html",
+        "role": "typography",
+        "title": "Typography"
+      },
+      {
+        "path": "preview/spacing.html",
+        "role": "spacing",
+        "title": "Spacing"
+      }
+    ]
+  },
+  "sourceFiles": {
+    "evidence": "source/evidence.md"
+  }
+}

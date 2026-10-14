@@ -1,0 +1,135 @@
+/* Databricks — tokens.css */
+/* Source: Databricks 2025 corporate brand palette and Databricks Extended Brand
+   Guidelines (brandguides.brandfolder.com/databricks-extended-brand-guidelines).
+   Values marked "adaptation" fill OpenDesign schema slots the brand does not
+   publish; see DESIGN.md → Provenance. */
+
+:root {
+  /* ─── Surface ──────────────────────────────────────────────────── */
+  --bg: #f9f7f4;            /* Oat Light — primary neutral */
+  --surface: #ffffff;       /* White — primary neutral */
+  --surface-warm: #eeede9;  /* Oat Medium — primary neutral */
+
+  /* ─── Foreground ───────────────────────────────────────────────── */
+  --fg: #1b3139;            /* Navy 800 — primary */
+  --fg-2: #303f47;          /* Gray – Navigation */
+  --muted: #5a6f77;         /* Gray – Text */
+  --meta: var(--muted);
+
+  /* ─── Border ───────────────────────────────────────────────────── */
+  --border: #dce0e2;        /* Gray – Lines */
+  --border-soft: #eeede9;   /* Oat Medium */
+
+  /* ─── Accent ───────────────────────────────────────────────────── */
+  --accent: #ff3621;        /* Lava 600 — primary */
+  --accent-on: #ffffff;
+  --accent-hover: #bd2b26;  /* Lava 700 */
+  --accent-active: #801c17; /* Lava 800 */
+
+  /* ─── Semantic ─────────────────────────────────────────────────── */
+  --success: #00a972;       /* Green 600 */
+  --warn: #ffab00;          /* Yellow 600 */
+  --danger: #98102a;        /* Maroon 600 */
+
+  /* ─── Typography ───────────────────────────────────────────────── */
+  --font-display: 'DM Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'DM Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Type scale — brand sizes are multiples of 8, plus 12 and 20 */
+  --text-xs: 12px;
+  --text-sm: 14px;          /* adaptation: dense web UI only */
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+  --text-4xl: 56px;
+
+  --leading-body: 1.5;      /* brand: ~150% for body copy */
+  --leading-tight: 1.2;     /* brand: ~120% for headlines */
+  --tracking-display: -0.02em; /* adaptation */
+
+  /* ─── Spacing (8-point grid) ───────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ─── Section rhythm ───────────────────────────────────────────── */
+  --section-y-desktop: 96px;
+  --section-y-tablet: 64px;
+  --section-y-phone: 48px;
+
+  /* ─── Radius (adaptation: Du Bois product base radius is 4px) ──── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ─── Elevation (Du Bois product shadows) ──────────────────────── */
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 2px 16px 0 rgba(0, 0, 0, 0.08);
+
+  /* ─── Focus ────────────────────────────────────────────────────── */
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--db-blue-600);
+
+  /* ─── Motion ───────────────────────────────────────────────────── */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ─── Layout (12-column grid) ──────────────────────────────────── */
+  --container-max: 1200px;
+  --container-gutter-desktop: 32px;
+  --container-gutter-tablet: 24px;
+  --container-gutter-phone: 16px;
+
+  /* ─── Brand-specific extensions ────────────────────────────────── */
+  /* Extended palette (Databricks Extended Brand Guidelines) */
+  --db-lava-300: #fabfba;
+  --db-lava-500: #ff5f46;
+  --db-navy-900: #0b2026;
+  --db-navy-700: #143d4a;
+  --db-navy-600: #1b5162;
+  --db-navy-500: #618794;
+  --db-navy-300: #c4ccd6;
+  --db-maroon-600: #98102a;
+  --db-yellow-600: #ffab00;
+  --db-green-600: #00a972;
+  --db-blue-600: #2272b4;
+  /* Default chart order (corporate slide template) */
+  --db-chart-1: #618794;    /* Navy 500 */
+  --db-chart-2: #ff5f46;    /* Lava 500 */
+  --db-chart-3: #fcba33;    /* Yellow 500 */
+  --db-chart-4: #42ba91;    /* Green 500 */
+  --db-chart-5: #ab4057;    /* Maroon 500 */
+  --db-chart-6: #c4ccd6;    /* Navy 300 */
+  --db-chart-7: #ff9e94;    /* Lava 400 */
+  --db-chart-8: #70c4ab;    /* Green 400 */
+}
+
+/* Dark layouts: Navy backgrounds with light text, as in the corporate
+   template's dark-mode slides. */
+[data-theme="dark"] {
+  --bg: #0b2026;            /* Navy 900 */
+  --surface: #1b3139;       /* Navy 800 */
+  --surface-warm: #143d4a;  /* Navy 700 */
+  --fg: #f9f7f4;            /* Oat Light */
+  --fg-2: #dce0e2;          /* Gray – Lines */
+  --muted: #90a5b1;         /* Navy 400 */
+  --border: #303f47;        /* Gray – Navigation */
+  --border-soft: #143d4a;   /* Navy 700 */
+  --accent-hover: #ff5f46;  /* Lava 500 */
+  --accent-active: #bd2b26; /* Lava 700 */
+  --success: #42ba91;       /* Green 500 */
+  --warn: #fcba33;          /* Yellow 500 */
+  --danger: #ff9e94;        /* Lava 400 */
+  --elev-raised: 0 8px 40px 0 rgba(0, 0, 0, 0.3);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px #8acaff;
+}

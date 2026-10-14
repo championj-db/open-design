@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Databricks spacing</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=DM+Mono&display=swap" />
+    <link rel="stylesheet" href="../tokens.css" />
+    <style>
+      body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); }
+      main { max-width: var(--container-max); margin: 0 auto; padding: var(--space-12) var(--container-gutter-desktop); }
+      h1 { margin: 0 0 var(--space-6); font-size: var(--text-2xl); }
+      h2 { margin: var(--space-8) 0 var(--space-4); font-size: var(--text-lg); }
+      .step { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-2); }
+      .step code { width: 160px; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+      .bar { height: 16px; background: var(--accent); border-radius: 2px; }
+      .radii { display: flex; gap: var(--space-6); }
+      .radius { width: 96px; height: 96px; background: var(--surface); box-shadow: var(--elev-ring); display: grid; place-items: center; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted); }
+      .raised { box-shadow: var(--elev-raised); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>8-point spacing</h1>
+      <div class="step"><code>--space-1 · 4px</code><div class="bar" style="width: var(--space-1)"></div></div>
+      <div class="step"><code>--space-2 · 8px</code><div class="bar" style="width: var(--space-2)"></div></div>
+      <div class="step"><code>--space-3 · 12px</code><div class="bar" style="width: var(--space-3)"></div></div>
+      <div class="step"><code>--space-4 · 16px</code><div class="bar" style="width: var(--space-4)"></div></div>
+      <div class="step"><code>--space-5 · 20px</code><div class="bar" style="width: var(--space-5)"></div></div>
+      <div class="step"><code>--space-6 · 24px</code><div class="bar" style="width: var(--space-6)"></div></div>
+      <div class="step"><code>--space-8 · 32px</code><div class="bar" style="width: var(--space-8)"></div></div>
+      <div class="step"><code>--space-12 · 48px</code><div class="bar" style="width: var(--space-12)"></div></div>
+      <h2>Radius and elevation</h2>
+      <div class="radii">
+        <div class="radius" style="border-radius: var(--radius-sm)">sm · 4</div>
+        <div class="radius" style="border-radius: var(--radius-md)">md · 8</div>
+        <div class="radius" style="border-radius: var(--radius-lg)">lg · 12</div>
+        <div class="radius raised" style="border-radius: var(--radius-md)">raised</div>
+      </div>
+    </main>
+  </body>
+</html>

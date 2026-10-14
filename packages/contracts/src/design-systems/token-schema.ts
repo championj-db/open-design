@@ -229,6 +229,27 @@ export const BRAND_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
     "--radius-xl", // 16px — kami hero containers
     "--elev-ring-accent", // 1px brand ring used as primary-button edge
   ],
+  databricks: [
+    "--db-lava-300", // #FABFBA Lava 300 — tints, light chart fills
+    "--db-lava-500", // #FF5F46 Lava 500 — secondary palette, dark-mode hover
+    "--db-navy-900", // #0B2026 Navy 900 — secondary palette, dark canvas
+    "--db-navy-700", // #143D4A Navy 700 — dark recessed surface
+    "--db-navy-600", // #1B5162 Navy 600 — extended navy
+    "--db-navy-500", // #618794 Navy 500 — extended navy, chart series 1
+    "--db-navy-300", // #C4CCD6 Navy 300 — extended navy, light fills
+    "--db-maroon-600", // #98102A Maroon 600 — secondary palette
+    "--db-yellow-600", // #FFAB00 Yellow 600 — secondary palette
+    "--db-green-600", // #00A972 Green 600 — secondary palette
+    "--db-blue-600", // #2272B4 Blue 600 — secondary palette, links and focus
+    "--db-chart-1", // default chart order from the corporate slide template
+    "--db-chart-2",
+    "--db-chart-3",
+    "--db-chart-4",
+    "--db-chart-5",
+    "--db-chart-6",
+    "--db-chart-7",
+    "--db-chart-8",
+  ],
   "tom-modern": [
     "--tm-accent-soft", // rgba accent tint for subtle backgrounds
     "--tm-shadow-hard", // 8px 8px hard offset shadow (hover emphasis)
