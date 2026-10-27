@@ -19,7 +19,7 @@ import { bindDatabricksRequestContext } from '../src/databricks/request-context.
 async function daemon() {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT)');
-  const shared = new Set<string>();
+  const shared = new Map<string, 'read' | 'write'>();
   const listeners = new Set<(id: string) => void>();
   const insertProject = (id: string, name: string) => {
     db.prepare('INSERT INTO projects VALUES (?, ?)').run(id, name);
@@ -39,7 +39,7 @@ async function daemon() {
   app.use('/api', createProjectOwnershipMiddleware({
     ownership,
     projectExists: (id) => db.prepare('SELECT 1 FROM projects WHERE id = ?').get(id) !== undefined,
-    isSharedProject: (id) => shared.has(id),
+    sharedProjectAccess: (id) => shared.get(id) ?? 'none',
     projectIdForRun: (runId) => runs.get(runId) ?? null,
   }));
   app.post('/api/projects', async (req, res) => {
@@ -52,6 +52,7 @@ async function daemon() {
     res.json({ projects: db.prepare('SELECT id, name FROM projects').all() });
   });
   app.get('/api/projects/:id/files', (req, res) => res.json({ projectId: req.params.id, files: ['index.html'] }));
+  app.put('/api/projects/:id/files/index.html', (req, res) => res.json({ projectId: req.params.id, saved: true }));
   app.post('/api/runs', (req, res) => {
     runs.set(`run-${req.body.projectId}`, req.body.projectId);
     res.json({ runId: `run-${req.body.projectId}` });
@@ -130,13 +131,22 @@ describe('per-user project visibility', () => {
     expect((await d.call('alice', 'GET', '/api/design-systems')).body.designSystems).toEqual([{ id: 'shared-ds' }]);
   });
 
-  it('keeps design-system projects shared with everyone', async () => {
+  it('lets other users read, but not edit, a project shared with them read-only', async () => {
     const d = await daemon();
     close = d.close;
     await d.call('alice', 'POST', '/api/projects', { id: 'ds-brand', name: 'Brand design system' });
-    d.shared.add('ds-brand');
+    expect((await d.call('bob', 'GET', '/api/projects/ds-brand/files')).status).toBe(404);
+    d.shared.set('ds-brand', 'read');
     expect((await d.call('bob', 'GET', '/api/projects/ds-brand/files')).status).toBe(200);
     expect((await d.call('bob', 'GET', '/api/projects')).body.projects).toEqual([{ id: 'ds-brand', name: 'Brand design system' }]);
+    const write = await d.call('bob', 'PUT', '/api/projects/ds-brand/files/index.html', {});
+    expect(write.status).toBe(403);
+    expect(write.body.error.code).toBe('FORBIDDEN');
+    expect((await d.call('bob', 'POST', '/api/runs', { projectId: 'ds-brand' })).status).toBe(403);
+    // The owner is never limited by the share.
+    expect((await d.call('alice', 'PUT', '/api/projects/ds-brand/files/index.html', {})).status).toBe(200);
+    d.shared.set('ds-brand', 'write');
+    expect((await d.call('bob', 'PUT', '/api/projects/ds-brand/files/index.html', {})).status).toBe(200);
   });
 
   it('never lets a second user claim an existing project id', async () => {

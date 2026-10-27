@@ -81,13 +81,49 @@ Every signed-in user shares one daemon, so projects are scoped per user
   its path, through a run id, or in a `projectId` / `projectIds` field — gets
   `404 PROJECT_NOT_FOUND`. List responses drop other users' projects and the
   runs and other items tied to them.
-- **Shared.** Design systems stay shared, including the project that backs
-  editing one; so do skills, templates and plugins.
+- **Design systems.** Follow their own sharing; see
+  [Design-system sharing](#design-system-sharing). Skills, templates and
+  plugins stay shared with every user.
 - **Not covered.** Projects created before ownership existed, or by background
   work no user started (such as automations that create a new project), have
   no owner and are hidden from every user. App-wide settings, memory, and the
   legacy `/artifacts` export folder are not per-user. In-container callers
   (agent tools on loopback) are not filtered.
+
+## Design-system sharing
+
+OpenDesign Cloud team workspaces are disabled, so design systems are shared
+between the app's users by the daemon instead
+(`apps/daemon/src/databricks/design-system-sharing.ts`):
+
+- **Private by default.** A design system belongs to the Databricks user whose
+  request created, imported or extracted it (recorded in the
+  `databricks_design_system_owners` table). Other users cannot see it.
+- **Share.** Its owner shares it with every user of the app from the design
+  system's ⋯ menu (**Share to team**), and takes it back with **Remove from
+  team**. Shared design systems appear in the **Team** collection. From the
+  CLI: `od collab share-design-system <id>`, `od collab unshare-design-system
+  <id>` and `od collab team-design-systems` (no `--workspace` flags), over the
+  same `/api/workspace/design-systems/...` routes the UI calls.
+- **Read-only for others.** Users it was shared with can browse, preview,
+  download and design with it, but not edit, publish, share or delete it
+  (`403 FORBIDDEN`). The project that backs it (the brand-extraction or
+  editing project) follows the same rule.
+- **Not covered.** Design systems that existed before sharing, or that an
+  in-container caller created, have no owner and stay editable by every user.
+  Built-in design systems are unaffected.
+
+## Local folders
+
+The daemon runs in the app container, so it cannot open a folder dialog on a
+user's computer or read their disk. In this mode **Link local code** (in the
+composer's Add menu, on Home and in a project) and the design-system creator's
+local-code drop zone pick the folder in the browser instead, and upload its
+files into the project under `context/local-code/<folder>/`, where the agent's
+file tools and sandbox read them. `node_modules`, `.git`, build output and
+files over 1 MB are skipped, and at most 400 files are uploaded per folder.
+The upload is a copy: later changes on the user's computer are not seen until
+the folder is linked again.
 
 ## AI (Model Serving)
 

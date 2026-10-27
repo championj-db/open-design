@@ -21,6 +21,7 @@ import {
   summarizeComponentsManifestForPrompt,
 } from '@open-design/contracts';
 
+import { notifyUserDesignSystemCreated } from './created-events.js';
 import { parseFrontmatter } from './frontmatter.js';
 import type { FrontmatterObject, FrontmatterValue } from './frontmatter.js';
 import { extractSwiftColors } from './swift-colors.js';
@@ -3293,6 +3294,7 @@ async function reserveUniqueSlugDirectory(
     const dir = path.join(root, candidate);
     try {
       await mkdir(dir);
+      notifyUserDesignSystemCreated(root, candidate);
       return { dirId: candidate, dir };
     } catch (err) {
       if (!isNodeErrorCode(err, 'EEXIST')) throw err;

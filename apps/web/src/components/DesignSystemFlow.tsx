@@ -54,6 +54,15 @@ import { latestTodosFromEvents } from '../runtime/todos';
 import { brandFaviconUrl } from '../runtime/brand-references';
 import { useBrandExtract } from '../runtime/useBrandExtract';
 import {
+  dedupeLocalCodeFiles,
+  LOCAL_CODE_SKIP_DIRS,
+  LOCAL_CODE_UPLOAD_ROOT,
+  localCodeRelativePath,
+  normalizeLocalCodePath,
+  selectLocalCodeFiles,
+} from '../runtime/local-code';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
+import {
   createFileSystemReadError,
   FILE_SYSTEM_READ_ERROR_MESSAGE,
   isFileSystemReadError,
@@ -251,11 +260,8 @@ const GENERATION_JOB_STORAGE_PREFIX = 'od:design-system-generation-job:';
 const GITHUB_CONNECTOR_ID = 'github';
 const CONNECTOR_CALLBACK_MESSAGE_TYPE = 'open-design:connector-connected';
 const GITHUB_CONNECTOR_STATUS_TIMEOUT_MS = 5000;
-const LOCAL_CODE_UPLOAD_ROOT = 'context/local-code';
 const ASSET_UPLOAD_ROOT = 'assets';
 const SOURCE_CONTEXT_MANIFEST_PATH = 'context/source-context.md';
-const MAX_LOCAL_CODE_UPLOAD_FILES = 120;
-const MAX_LOCAL_CODE_FILE_BYTES = 1024 * 1024;
 const MAX_FIGMA_CONTEXT_FILES = 10;
 const MAX_ASSET_UPLOAD_FILES = 80;
 const MAX_ASSET_FILE_BYTES = 12 * 1024 * 1024;
@@ -355,6 +361,9 @@ export function DesignSystemCreationFlow({
   const { t } = useI18n();
   const { context: workspaceContext } = useWorkspaceContext();
   const [step, setStep] = useState<SetupStep>('setup');
+  // On a Databricks App the daemon cannot open a folder dialog on the user's
+  // computer; the drop zone's own browser picker reads the folder instead.
+  const nativeFolderDialog = !isPlatformManagedAuth(useAuthSession());
   // A Library "create design system from selection" hand-off pre-fills the
   // source material with the chosen assets (single-shot; cleared on read).
   const [state, setState] = useState<SetupState>(() => {
@@ -1337,7 +1346,7 @@ export function DesignSystemCreationFlow({
                     names={localCodeSourceLabels(state, t)}
                     directory
                     onZoneClick={() => emitCreateFormClick('browse_folder')}
-                    onBrowseFolder={() => void handlePickCodeFolder()}
+                    onBrowseFolder={nativeFolderDialog ? () => void handlePickCodeFolder() : undefined}
                     onRemoveName={handleRemoveCodeFolder}
                     onError={setVisibleError}
                     onProcessingStart={beginSourceProcessing}
@@ -5194,53 +5203,6 @@ interface StagedFigmaContext {
 interface StagedAssetContext {
   uploadedPaths: string[];
   skippedCount: number;
-}
-
-const LOCAL_CODE_SKIP_DIRS = new Set([
-  '.git',
-  '.next',
-  '.nuxt',
-  '.turbo',
-  '.vercel',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out',
-  'target',
-]);
-
-function localCodeRelativePath(file: File): string {
-  const browserPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-  return normalizeLocalCodePath(browserPath || file.name);
-}
-
-function normalizeLocalCodePath(path: string): string {
-  return path.replace(/\\/g, '/').split('/').filter(Boolean).join('/');
-}
-
-function shouldStageLocalCodeFile(file: File): boolean {
-  const relativePath = localCodeRelativePath(file);
-  if (!relativePath) return false;
-  if (file.size > MAX_LOCAL_CODE_FILE_BYTES) return false;
-  const parts = relativePath.split('/');
-  return !parts.some((part) => LOCAL_CODE_SKIP_DIRS.has(part));
-}
-
-function selectLocalCodeFiles(files: File[]): File[] {
-  return dedupeLocalCodeFiles(files.filter(shouldStageLocalCodeFile)).slice(0, MAX_LOCAL_CODE_UPLOAD_FILES);
-}
-
-function dedupeLocalCodeFiles(files: File[]): File[] {
-  const seen = new Set<string>();
-  const next: File[] = [];
-  for (const file of files) {
-    const key = `${localCodeRelativePath(file)}:${file.size}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    next.push(file);
-  }
-  return next;
 }
 
 function resourceRelativePath(file: File): string {

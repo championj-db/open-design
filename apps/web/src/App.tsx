@@ -237,6 +237,7 @@ import {
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
 import { cloudAccountSurfacesAllowed, useAuthSession } from './hooks/useAuthSession';
+import { hasPendingLocalFolders, uploadPendingLocalFolders } from './runtime/local-code';
 import { resumeThumbnailLoads, suspendThumbnailLoads } from './lib/thumbnail-load-gate';
 import type {
   PluginShareAction,
@@ -3441,6 +3442,24 @@ function AppInner() {
               : {}),
           });
         }
+        // Folders picked on Home in the browser (a Databricks App) upload
+        // into the project now that it exists; the first message then names
+        // their project paths.
+        let initialRunContext = input.initialRunContext;
+        if (
+          !workingDirHandoffFailed
+          && initialRunContext?.workspaceItems
+          && hasPendingLocalFolders(initialRunContext.workspaceItems)
+        ) {
+          initialRunContext = {
+            ...initialRunContext,
+            workspaceItems: await uploadPendingLocalFolders(
+              result.project.id,
+              initialRunContext.workspaceItems,
+              createWorkspaceContext,
+            ),
+          };
+        }
         trackProjectCreateResult(
           analytics.track,
           {
@@ -3504,10 +3523,10 @@ function AppInner() {
                 `od:auto-send-attachments:${result.project.id}`,
               );
             }
-            if (input.initialRunContext && Object.keys(input.initialRunContext).length > 0) {
+            if (initialRunContext && Object.keys(initialRunContext).length > 0) {
               window.sessionStorage.setItem(
                 `od:auto-send-context:${result.project.id}`,
-                JSON.stringify(input.initialRunContext),
+                JSON.stringify(initialRunContext),
               );
             } else {
               window.sessionStorage.removeItem(

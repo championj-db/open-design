@@ -10,6 +10,7 @@ import {
   type DesignTokenBinding,
   type DesignTokenContractReport,
 } from './token-contract.js';
+import { notifyUserDesignSystemCreated } from './created-events.js';
 import { extractCssCustomProperties } from './token-evidence.js';
 
 export type LocalDesignSystemImportResult = {
@@ -411,6 +412,7 @@ async function reserveNextAvailableSlug(
     if (reserved.has(id)) continue;
     try {
       await mkdir(path.join(root, id));
+      notifyUserDesignSystemCreated(root, id);
       return id;
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;

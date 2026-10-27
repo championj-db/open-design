@@ -22,9 +22,10 @@ import { databricksRequestContext } from './request-context.js';
 //
 // A project with no owner (created before this existed) is hidden from every
 // signed-in user. In-container callers (agent tools on loopback) carry no
-// user and are not filtered, as before. Design systems stay shared: so do the
-// projects that back editing one (`isSharedProject`), as do the catalogs that
-// are not projects at all — skills, templates, plugins.
+// user and are not filtered, as before. A project that backs a design system
+// follows that design system's sharing instead (`sharedProjectAccess`, see
+// design-system-sharing.ts): read-only for a user it was shared with. Catalogs
+// that are not projects at all — skills, templates, plugins — stay shared.
 
 const OWNER_TABLE = 'databricks_project_owners';
 
@@ -146,25 +147,36 @@ export function redactForUser(body: unknown, visible: (projectId: string) => boo
 export function createProjectOwnershipMiddleware({
   ownership,
   projectExists,
-  isSharedProject,
+  sharedProjectAccess,
   projectIdForRun,
 }: {
   ownership: ProjectOwnership;
   projectExists: (projectId: string) => boolean;
-  /** Projects every signed-in user may reach: those backing a shared design system. */
-  isSharedProject: (projectId: string) => boolean;
+  /**
+   * What a user who does not own the project may do with it: projects that
+   * back a design system shared with them are readable.
+   */
+  sharedProjectAccess: (projectId: string, userId: string) => 'none' | 'read' | 'write';
   projectIdForRun: (runId: string) => string | null;
 }): RequestHandler {
   return (req, res, next) => {
     const user = databricksRequestContext(req)?.user;
     if (!user) return next();
-    const visible = (projectId: string) =>
-      ownership.visibleTo(projectId, user.id) || !projectExists(projectId) || isSharedProject(projectId);
+    const access = (projectId: string): 'none' | 'read' | 'write' =>
+      ownership.visibleTo(projectId, user.id) || !projectExists(projectId)
+        ? 'write'
+        : sharedProjectAccess(projectId, user.id);
+    const visible = (projectId: string) => access(projectId) !== 'none';
     // A project id that does not exist yet passes: the route answers 404, or
     // creates it and attribution claims it for this user.
-    const denied = projectIdsInRequest({ path: req.originalUrl.split('?')[0]!, body: req.body, query: req.query }, projectIdForRun)
-      .find((projectId) => !visible(projectId));
-    if (denied) return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'Project not found');
+    const named = projectIdsInRequest({ path: req.originalUrl.split('?')[0]!, body: req.body, query: req.query }, projectIdForRun);
+    if (named.some((projectId) => !visible(projectId))) {
+      return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'Project not found');
+    }
+    const mutating = req.method !== 'GET' && req.method !== 'HEAD';
+    if (mutating && named.some((projectId) => access(projectId) === 'read')) {
+      return sendApiError(res, 403, 'FORBIDDEN', 'This project was shared with you to view, not to edit');
+    }
     const json = res.json.bind(res) as Response['json'];
     res.json = ((body: unknown) => {
       const redacted = redactForUser(body, visible);
