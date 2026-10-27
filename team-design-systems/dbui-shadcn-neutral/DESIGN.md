@@ -38,10 +38,10 @@ Monochrome and minimal, as in the shadcn/ui neutral theme: black and white, gray
 
 **Key colors (light)**
 
-- **Page background:** `#FFFFFF`
-- **Foreground text:** `#0A0A0A`
-- **Primary accent:** `#171717`
-- **Border:** `#E5E5E5`
+- **Page background**: `#FFFFFF`
+- **Foreground text**: `#0A0A0A`
+- **Primary accent**: `#171717`
+- **Border**: `#E5E5E5`
 
 | Token | Role name | Light | Dark | Use |
 | --- | --- | --- | --- | --- |

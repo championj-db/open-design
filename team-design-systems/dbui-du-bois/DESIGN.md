@@ -38,10 +38,10 @@ Calm, dense and utilitarian. Content is the product: tables, editors and data do
 
 **Key colors (light)**
 
-- **Page background:** `#FFFFFF`
-- **Foreground text:** `#161616`
-- **Primary accent:** `#2272B4`
-- **Border:** `#EBEBEB`
+- **Page background**: `#FFFFFF`
+- **Foreground text**: `#161616`
+- **Primary accent**: `#2272B4`
+- **Border**: `#EBEBEB`
 
 | Token | Role name | Light | Dark | Use |
 | --- | --- | --- | --- | --- |

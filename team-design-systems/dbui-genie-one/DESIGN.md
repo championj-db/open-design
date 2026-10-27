@@ -38,10 +38,10 @@ Conversational and consumer-facing: more air than Du Bois, larger readable body 
 
 **Key colors (light)**
 
-- **Page background:** `#FFFFFF`
-- **Foreground text:** `#161616`
-- **Primary accent:** `#161616`
-- **Border:** `#EBEBEB`
+- **Page background**: `#FFFFFF`
+- **Foreground text**: `#161616`
+- **Primary accent**: `#161616`
+- **Border**: `#EBEBEB`
 
 | Token | Role name | Light | Dark | Use |
 | --- | --- | --- | --- | --- |

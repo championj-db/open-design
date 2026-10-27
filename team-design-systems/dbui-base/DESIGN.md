@@ -38,10 +38,10 @@ Friendlier and more modern than Du Bois while staying a product UI: rounder shap
 
 **Key colors (light)**
 
-- **Page background:** `#FFFFFF`
-- **Foreground text:** `#333333`
-- **Primary accent:** `#2272B4`
-- **Border:** `#E5E5E5`
+- **Page background**: `#FFFFFF`
+- **Foreground text**: `#333333`
+- **Primary accent**: `#2272B4`
+- **Border**: `#E5E5E5`
 
 | Token | Role name | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
