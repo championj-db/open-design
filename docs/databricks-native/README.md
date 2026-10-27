@@ -112,6 +112,14 @@ between the app's users by the daemon instead
 - **Not covered.** Design systems that existed before sharing, or that an
   in-container caller created, have no owner and stay editable by every user.
   Built-in design systems are unaffected.
+- **Team design systems.** At startup the daemon installs each directory of
+  `team-design-systems/` as a published design system owned by the app and
+  shared with every user (`apps/daemon/src/databricks/team-design-systems.ts`),
+  so they appear in **Team**, read-only. These are the four dbui themes from
+  `@databricks/design-system` 2.0.15: Du Bois (the default), dbui Base, Genie
+  One and shadcn neutral. Each holds a `DESIGN.md`, from which the daemon
+  generates the package, plus a `colors_and_type.css` that replaces the
+  generated token sheet. Editing a seed re-installs it on the next deploy.
 
 ## Local folders
 

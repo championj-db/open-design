@@ -1,0 +1,67 @@
+/* dbui Du Bois theme tokens, from DESIGN.md. Light by default; dark under prefers-color-scheme. */
+:root {
+  --dbui-du-bois-background: #FFFFFF;
+  --dbui-du-bois-surface: #FFFFFF;
+  --dbui-du-bois-surface-muted: #F7F7F7;
+  --dbui-du-bois-foreground: #161616;
+  --dbui-du-bois-muted: #6F6F6F;
+  --dbui-du-bois-border: #EBEBEB;
+  --dbui-du-bois-accent: #2272B4;
+  --dbui-du-bois-on-accent: #FFFFFF;
+  --dbui-du-bois-success: #277C43;
+  --dbui-du-bois-danger: #C82D4C;
+  --dbui-du-bois-warning: #BE501E;
+  --dbui-du-bois-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --dbui-du-bois-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --dbui-du-bois-radius-sm: 4px;
+  --dbui-du-bois-radius-md: 8px;
+  --dbui-du-bois-radius-lg: 12px;
+  --dbui-du-bois-radius-button: 4px;
+  --dbui-du-bois-font-size-base: 13px;
+  --dbui-du-bois-space-1: 4px;
+  --dbui-du-bois-space-2: 8px;
+  --dbui-du-bois-space-3: 12px;
+  --dbui-du-bois-space-4: 16px;
+  --dbui-du-bois-space-6: 24px;
+  --dbui-du-bois-space-8: 32px;
+
+  --color-background: var(--dbui-du-bois-background);
+  --color-surface: var(--dbui-du-bois-surface);
+  --color-background-soft: var(--dbui-du-bois-surface-muted);
+  --color-text: var(--dbui-du-bois-foreground);
+  --color-text-1: var(--dbui-du-bois-foreground);
+  --color-text-secondary: var(--dbui-du-bois-muted);
+  --color-border: var(--dbui-du-bois-border);
+  --color-primary: var(--dbui-du-bois-accent);
+  --color-primary-soft: color-mix(in srgb, var(--dbui-du-bois-accent) 14%, transparent);
+  --font-family: var(--dbui-du-bois-font-sans);
+  --code-font-family: var(--dbui-du-bois-font-mono);
+  --radius-control: var(--dbui-du-bois-radius-sm);
+  --radius-card: var(--dbui-du-bois-radius-md);
+  --space-2: var(--dbui-du-bois-space-2);
+  --space-3: var(--dbui-du-bois-space-3);
+  --space-4: var(--dbui-du-bois-space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dbui-du-bois-background: #11171C;
+    --dbui-du-bois-surface: #11171C;
+    --dbui-du-bois-surface-muted: #1F272D;
+    --dbui-du-bois-foreground: #E8ECF0;
+    --dbui-du-bois-muted: #92A4B3;
+    --dbui-du-bois-border: #1F272D;
+    --dbui-du-bois-accent: #4299E0;
+    --dbui-du-bois-on-accent: #FFFFFF;
+    --dbui-du-bois-success: #3BA65E;
+    --dbui-du-bois-danger: #E65B77;
+    --dbui-du-bois-warning: #DE7921;
+  }
+}
+
+.od-design-system-preview {
+  color: var(--dbui-du-bois-foreground);
+  background: var(--dbui-du-bois-background);
+  font-family: var(--dbui-du-bois-font-sans);
+  font-size: var(--dbui-du-bois-font-size-base);
+}

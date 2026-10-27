@@ -25,9 +25,13 @@ import { databricksRequestContext } from './request-context.js';
 //
 // Built-in design systems are untouched. A user design system with no owner
 // (created before this existed, or by an in-container caller) stays open to
-// every user, as all of them were before.
+// every user, as all of them were before. The app's own Team design systems
+// (team-design-systems.ts) are owned by `TEAM_OWNER`, which no user is, so
+// they are shared read-only with everyone.
 
 const OWNER_TABLE = 'databricks_design_system_owners';
+/** Owner of the design systems the app itself installs for every user. */
+export const TEAM_OWNER = 'opendesign:team';
 const USER_PREFIX = 'user:';
 
 export type DesignSystemAccess = 'none' | 'read' | 'write';
@@ -38,6 +42,8 @@ export interface DesignSystemSharing {
   /** Record a freshly created design system: owned by `userId` and private, or unowned. */
   recordCreated(designSystemId: string, userId: string | null): void;
   setShared(designSystemId: string, shared: boolean): void;
+  /** Record a design system the app installs: owned by `TEAM_OWNER` and shared. */
+  recordTeamOwned(designSystemId: string): void;
 }
 
 export function createDesignSystemSharing(db: Database.Database): DesignSystemSharing {
@@ -55,6 +61,9 @@ export function createDesignSystemSharing(db: Database.Database): DesignSystemSh
   );
   const remove = db.prepare(`DELETE FROM ${OWNER_TABLE} WHERE design_system_id = ?`);
   const updateShared = db.prepare(`UPDATE ${OWNER_TABLE} SET shared = ? WHERE design_system_id = ?`);
+  const upsertTeam = db.prepare(
+    `INSERT OR REPLACE INTO ${OWNER_TABLE} (design_system_id, user_id, shared, created_at) VALUES (?, ?, 1, ?)`,
+  );
   const row = (id: string) => select.get(id) as { userId: string; shared: number } | undefined;
   return {
     ownerOf: (id) => row(id)?.userId ?? null,
@@ -65,6 +74,9 @@ export function createDesignSystemSharing(db: Database.Database): DesignSystemSh
     },
     setShared(id, shared) {
       updateShared.run(shared ? 1 : 0, id);
+    },
+    recordTeamOwned(id) {
+      upsertTeam.run(id, TEAM_OWNER, Date.now());
     },
   };
 }
