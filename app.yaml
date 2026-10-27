@@ -31,3 +31,7 @@ env:
   # the file tools only.
   - name: OD_DATABRICKS_SANDBOX
     value: "1"
+  # The Model Serving endpoint the Databricks agent's "Default" model resolves
+  # to. Users who picked a specific model keep it.
+  - name: OD_DATABRICKS_DEFAULT_MODEL
+    value: "databricks-claude-opus-5-5"
