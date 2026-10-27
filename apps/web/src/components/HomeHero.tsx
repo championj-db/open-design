@@ -109,6 +109,8 @@ import {
   PLACEHOLDER_BASE_HINT_KEY,
   type PlaceholderScenario,
 } from './home-hero/placeholderScenarios';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
+import { pickLocalFolderFiles, stagePendingLocalFolder } from '../runtime/local-code';
 
 export interface HomeHeroSubmitHandler {
   (): void;
@@ -431,6 +433,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 ) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
+  const platformManagedAuth = isPlatformManagedAuth(useAuthSession());
   // Docked = the composer without Home's page around it. Read in the render
   // below to drop the furniture (headline, type row, example grid) rather than
   // to change how the composer itself behaves.
@@ -1147,6 +1150,20 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }
 
   async function handleLinkLocalCodeContext() {
+    if (platformManagedAuth) {
+      // On a Databricks App the browser reads the folder; its files upload
+      // into the project once it exists (runtime/local-code.ts).
+      const files = await pickLocalFolderFiles();
+      if (files) addWorkspaceContextItem(stagePendingLocalFolder(files));
+      trackContextLinkResult(analytics.track, {
+        page_name: 'home',
+        area: 'chat_composer',
+        context_kind: 'local_code',
+        result: files ? 'success' : 'cancelled',
+        ...(files ? { count: 1 } : {}),
+      });
+      return;
+    }
     const selected = await onPickLocalCodeDir?.();
     if (!selected) {
       trackContextLinkResult(analytics.track, {

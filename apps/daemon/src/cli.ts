@@ -1239,6 +1239,7 @@ function printCollabHelp() {
   od collab share-resource <design-systems|plugins|skills> <id> --workspace <id> --workspace-member <id> [--json]
   od collab team-resources <design-systems|plugins|skills> --workspace <id> --workspace-member <id> [--json]
   od collab share-design-system <designSystemId> --workspace <id> --workspace-member <id> [--json]
+  od collab unshare-design-system <designSystemId> --workspace <id> --workspace-member <id> [--json]
   od collab team-design-systems --workspace <id> --workspace-member <id> [--json]
 
 Team-edition collaboration: presence overlay + sync trigger. The
@@ -1250,7 +1251,9 @@ members can pull it, and reports the sync state (local_only / pending_upload /
 synced / sync_failed). \`share-resource <kind> <id>\` promotes a personal design
 system, plugin, or skill into the team scope through the resource hub, and
 \`team-resources <kind>\` lists the ones already shared (the \`*-design-system\`
-forms are kept as aliases).
+forms are kept as aliases). \`unshare-design-system\` takes one back.
+On a Databricks App there is no team workspace: the design-system forms share
+with every user of the app and take no --workspace flags.
 
 Options:
   --project <id>          Project id (alternative to the positional argument).
@@ -1298,10 +1301,15 @@ async function runCollab(args) {
     sub === 'share-resource' ||
     sub === 'team-resources' ||
     sub === 'share-design-system' ||
+    sub === 'unshare-design-system' ||
     sub === 'team-design-systems'
   ) {
     const base = await cliDaemonBaseUrl(flags);
-    const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags, true);
+    // A Databricks App shares design systems with every user of the app, so
+    // those forms work without a workspace; the daemon refuses them where a
+    // team workspace is required.
+    const designSystemForm = sub.endsWith('design-systems') || sub.endsWith('design-system');
+    const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags, !designSystemForm);
     const emit = (payload, plain) =>
       flags.json ? process.stdout.write(JSON.stringify(payload, null, 2) + '\n') : plain();
     const wsRequest = async (method, path, body) => {
@@ -1332,7 +1340,7 @@ async function runCollab(args) {
     if (sub === 'team-design-systems') {
       basePath = 'design-systems';
       isList = true;
-    } else if (sub === 'share-design-system') {
+    } else if (sub === 'share-design-system' || sub === 'unshare-design-system') {
       basePath = 'design-systems';
       isList = false;
       resourceId = flags['design-system'] || positionals[0];
@@ -1357,6 +1365,13 @@ async function runCollab(args) {
     if (!resourceId) {
       console.error('missing <id>');
       process.exit(2);
+    }
+    if (sub === 'unshare-design-system') {
+      const body = await wsRequest(
+        'DELETE',
+        `/api/workspace/${basePath}/${encodeURIComponent(resourceId)}/share`,
+      );
+      return emit(body, () => console.log(`unshared=${body?.unshared ?? false}`));
     }
     const body = await wsRequest(
       'POST',

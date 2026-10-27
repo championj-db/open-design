@@ -231,7 +231,7 @@ function renderWorkspaceContextToolHints(items: WorkspaceContextItem[]) {
   }
   if (kinds.has('local-code')) {
     hints.push(
-      '- Local code folders: use the absolute path as read-only implementation context. Inspect files under that folder when useful, align with its conventions, and make edits only in the active OpenDesign project unless the user explicitly asks otherwise.',
+      '- Local code folders: use the absolute path as read-only implementation context, or — for a folder uploaded from the user\'s computer — the project-relative path. Inspect files under that folder when useful, align with its conventions, and leave the folder itself unchanged: make edits only elsewhere in the active OpenDesign project unless the user explicitly asks otherwise.',
     );
   }
   if (kinds.has('live-artifact')) {

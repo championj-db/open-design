@@ -1225,6 +1225,16 @@ import {
   createProjectOwnershipMiddleware,
   type ProjectOwnership,
 } from './databricks/project-ownership.js';
+import {
+  attributeNewDesignSystems,
+  backingDesignSystemId,
+  createDesignSystemSharing,
+  createDesignSystemSharingMiddleware,
+  designSystemAccess,
+  type DesignSystemSharing,
+} from './databricks/design-system-sharing.js';
+import { onUserDesignSystemCreated } from './design-systems/created-events.js';
+import { readBrandDetail } from './brands/index.js';
 import { databricksAgentForRequest } from './databricks/agent-models.js';
 import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
 import { registerAuthSessionRoutes } from './routes/auth-session.js';
@@ -3236,6 +3246,11 @@ export async function startServer({
     if (!projectOwnership) throw new Error('project ownership is not initialized');
     return projectOwnership;
   };
+  let designSystemSharing: DesignSystemSharing | null = null;
+  const requireDesignSystemSharing = (): DesignSystemSharing => {
+    if (!designSystemSharing) throw new Error('design-system sharing is not initialized');
+    return designSystemSharing;
+  };
   if (databricksRuntime?.servicePrincipal && (process.env.OD_DATABRICKS_SANDBOX ?? '').trim() === '1') {
     const servicePrincipal = databricksRuntime.servicePrincipal;
     const broker = createSandboxBroker({
@@ -3386,11 +3401,32 @@ export async function startServer({
           visibleTo: (projectId, userId) => requireProjectOwnership().visibleTo(projectId, userId),
         },
         projectExists: (projectId) => getProject(db, projectId) !== null,
-        isSharedProject: (projectId) => getProject(db, projectId)?.metadata?.importedFrom === 'design-system',
+        // A project backing a design system follows that design system's
+        // sharing (databricks/design-system-sharing.ts).
+        sharedProjectAccess: (projectId, userId) => {
+          const designSystemId = backingDesignSystemId(getProject(db, projectId));
+          return designSystemId ? designSystemAccess(requireDesignSystemSharing(), designSystemId, userId) : 'none';
+        },
         projectIdForRun: (runId) => {
           const projectId = design.runs.get(runId)?.projectId;
           return typeof projectId === 'string' && projectId ? projectId : null;
         },
+      }),
+    );
+    // User design systems are private to their creator until shared with
+    // every user of the app (databricks/design-system-sharing.ts).
+    app.use(
+      '/api',
+      createDesignSystemSharingMiddleware({
+        sharing: {
+          ownerOf: (id) => requireDesignSystemSharing().ownerOf(id),
+          isShared: (id) => requireDesignSystemSharing().isShared(id),
+          recordCreated: (id, userId) => requireDesignSystemSharing().recordCreated(id, userId),
+          setShared: (id, shared) => requireDesignSystemSharing().setShared(id, shared),
+        },
+        listUserDesignSystemIds: async () =>
+          (await listAllDesignSystems()).filter((system) => system.source === 'user').map((system) => system.id),
+        designSystemIdForBrand: (brandId) => readBrandDetail(BRANDS_DIR, brandId)?.meta.designSystemId ?? null,
       }),
     );
   }
@@ -3597,6 +3633,8 @@ export async function startServer({
   if (databricksRuntime) {
     projectOwnership = createProjectOwnership(db);
     attributeNewProjects(projectOwnership, onProjectInserted);
+    designSystemSharing = createDesignSystemSharing(db);
+    attributeNewDesignSystems(designSystemSharing, USER_DESIGN_SYSTEMS_DIR, onUserDesignSystemCreated);
   }
   daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);

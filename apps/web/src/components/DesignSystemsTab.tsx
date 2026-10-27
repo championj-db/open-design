@@ -17,6 +17,7 @@ import type {
 } from '@open-design/contracts/analytics';
 import { useI18n } from '../i18n';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
 import {
   beginWorkspaceResourceScopedRead,
   beginWorkspaceScopedRead,
@@ -91,6 +92,18 @@ type SurfaceFilter = 'all' | Surface;
 type DesignSystemCollection = 'mine' | 'team' | 'official' | 'enterprise';
 const EMPTY_TEAM_SHARED_IDS: ReadonlySet<string> = new Set();
 const EMPTY_TEAM_SHARED_META: ReadonlyMap<string, { canUnshare?: boolean }> = new Map();
+
+// Headers for the daemon's team-share routes, or null when there is nowhere to
+// share to. A Cloud team workspace scopes them by its identity. A Databricks
+// App has no team workspace: the daemon shares with every user of the app, so
+// the routes need no workspace headers there.
+function teamShareHeaders(
+  context: WorkspaceCollabContext | null,
+  platformShared: boolean,
+): HeadersInit | null {
+  if (context && workspaceContextHasTeamIdentity(context)) return workspaceProjectHeaders(context);
+  return platformShared ? {} : null;
+}
 type DesignSystemActionKind = 'edit' | 'publish' | 'default' | 'delete';
 
 const SURFACE_PILLS: { value: SurfaceFilter; labelKey: 'examples.modeAll' | 'ds.surfaceWeb' | 'ds.surfaceImage' | 'ds.surfaceVideo' | 'ds.surfaceAudio' }[] = [
@@ -233,7 +246,11 @@ export function DesignSystemsTab({
   // systems; gating on the plan hid the collection from those teams even though
   // the daemon serves and shares their resources. Personal / signed-out sessions
   // have no team plane and correctly get no team tab.
-  const hasTeamWorkspace = workspaceContextHasTeamIdentity(workspaceContext);
+  const hasCloudTeam = workspaceContextHasTeamIdentity(workspaceContext);
+  const platformShared = isPlatformManagedAuth(useAuthSession());
+  const platformSharedRef = useRef(platformShared);
+  platformSharedRef.current = platformShared;
+  const hasTeamWorkspace = hasCloudTeam || platformShared;
   useEffect(() => {
     if (designSystemCollection === 'team' && !hasTeamWorkspace) setDesignSystemCollection('mine');
   }, [designSystemCollection, hasTeamWorkspace]);
@@ -442,7 +459,8 @@ export function DesignSystemsTab({
   ) => {
     const requestGeneration = ++teamSharedRequestGenerationRef.current;
     const read = beginWorkspaceScopedRead(workspaceContextRef.current);
-    if (!read.context || !workspaceContextHasTeamIdentity(read.context)) {
+    const headers = teamShareHeaders(read.context, platformSharedRef.current);
+    if (!headers) {
       setTeamSharedState({
         workspaceIdentity: workspaceIdentityCacheKey(read.context),
         ids: new Set(),
@@ -461,7 +479,7 @@ export function DesignSystemsTab({
       const readTeamIndex = async () => {
         const res = await fetch('/api/workspace/design-systems/team', {
           cache: 'no-store',
-          headers: workspaceProjectHeaders(context),
+          headers,
         });
         if (!res.ok) throw new Error(`design-systems-team ${res.status}`);
         return (await res.json()) as { ids?: unknown; resources?: unknown };
@@ -513,7 +531,7 @@ export function DesignSystemsTab({
     } catch {
       // Non-fatal: leave the team collection empty on a transient failure.
     }
-  }, [onSystemsRefresh, workspaceIdentity]);
+  }, [onSystemsRefresh, workspaceIdentity, platformShared]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -525,7 +543,7 @@ export function DesignSystemsTab({
   }, [isActive, refreshTeamShared]);
 
   const handleTeamIndexStreamActive = useWorkspaceSnapshotActivation({
-    enabled: isActive && hasTeamWorkspace,
+    enabled: isActive && hasCloudTeam,
     identity: workspaceIdentity,
     // The active-mount read above is the initial exact-scope snapshot. Join it
     // when stream activation lands concurrently; real change events still use
@@ -545,8 +563,8 @@ export function DesignSystemsTab({
       },
     },
     {
-      workspaceContext: hasTeamWorkspace ? workspaceContext : null,
-      enabled: hasTeamWorkspace,
+      workspaceContext: hasCloudTeam ? workspaceContext : null,
+      enabled: hasCloudTeam,
       onActive: () => {
         if (!isActiveRef.current) {
           teamSharedStaleRef.current = true;
@@ -576,8 +594,8 @@ export function DesignSystemsTab({
   // rendering distinguishes the two cases (see the `syncToTeam` label above).
   async function handleShareToTeam(system: DesignSystemSummary) {
     if (sharingId) return;
-    const context = workspaceContextRef.current;
-    if (!context || !workspaceContextHasTeamIdentity(context)) {
+    const headers = teamShareHeaders(workspaceContextRef.current, platformSharedRef.current);
+    if (!headers) {
       notifyAction('error', t('dsManager.shareToTeamFailed'));
       return;
     }
@@ -590,7 +608,7 @@ export function DesignSystemsTab({
     try {
       const res = await fetch(`/api/workspace/design-systems/${encodeURIComponent(system.id)}/share`, {
         method: 'POST',
-        headers: workspaceProjectHeaders(context),
+        headers,
       });
       const body = (await res.json().catch(() => ({}))) as { shared?: boolean };
       if (res.ok && body.shared) {
@@ -644,8 +662,8 @@ export function DesignSystemsTab({
   // button shows).
   async function handleUnshareFromTeam(system: DesignSystemSummary) {
     if (unsharingId) return;
-    const context = workspaceContextRef.current;
-    if (!context || !workspaceContextHasTeamIdentity(context)) {
+    const headers = teamShareHeaders(workspaceContextRef.current, platformSharedRef.current);
+    if (!headers) {
       notifyAction('error', t('dsManager.unshareFromTeamFailed'));
       return;
     }
@@ -655,7 +673,7 @@ export function DesignSystemsTab({
     try {
       const res = await fetch(`/api/workspace/design-systems/${encodeURIComponent(system.id)}/share`, {
         method: 'DELETE',
-        headers: workspaceProjectHeaders(context),
+        headers,
       });
       const body = (await res.json().catch(() => ({}))) as { unshared?: boolean };
       if (res.ok && body.unshared) {

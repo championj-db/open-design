@@ -39,6 +39,13 @@ import type {
 import { deriveUploadCohort } from '../analytics/upload-tracking';
 import { notifyCompletionFeedbackGesture } from '../utils/notifications';
 import { projectRawUrl, uploadProjectFiles, openFolderDialog, fetchRecentLinkedDirs, pushRecentLinkedDir, dirExists, applyLibraryAsset, fetchLibraryAssetElementHtml } from "../providers/registry";
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
+import {
+  MAX_LOCAL_FOLDER_UPLOAD_FILES,
+  pickLocalFolderFiles,
+  uploadedLocalFolderContextItem,
+  uploadLocalFolder,
+} from '../runtime/local-code';
 import {
   duplicatePluginAsProject,
   patchProject,
@@ -806,6 +813,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     const [slash, setSlash] = useState<{ q: string } | null>(null);
     const [slashIndex, setSlashIndex] = useState(0);
     const [uploading, setUploading] = useState(false);
+    const platformManagedAuth = isPlatformManagedAuth(useAuthSession());
     const [uploadError, setUploadError] = useState<string | null>(null);
     /* 待发送托盘里【还没传完 / 传失败】的那几张卡(设计稿 #61 / #63)。
        它们不进 `staged` —— `staged` 是「能跟着这条消息发出去的附件」,而这几张
@@ -1872,7 +1880,54 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       }
     }
 
+    // On a Databricks App the daemon cannot reach the user's disk, so the
+    // browser reads the folder and its files are uploaded into the project
+    // (runtime/local-code.ts) instead of being linked by path.
+    async function handleUploadLocalCodeContext() {
+      if (!projectId) return;
+      const files = await pickLocalFolderFiles();
+      const track = (result: 'cancelled' | 'failed' | 'success', count?: number) =>
+        trackContextLinkResult(analytics.track, {
+          page_name: 'chat_panel',
+          area: 'chat_composer',
+          context_kind: 'local_code',
+          result,
+          ...(count !== undefined ? { count } : {}),
+          project_id: projectId,
+        });
+      if (!files) {
+        track('cancelled');
+        return;
+      }
+      setUploading(true);
+      try {
+        const upload = await uploadLocalFolder(projectId, files, workspaceContext);
+        if (!upload) {
+          onShowToast?.(t('localCode.uploadFailed'));
+          track('failed');
+          return;
+        }
+        appendWorkspacePrompt(uploadedLocalFolderContextItem(upload));
+        const folder = upload.path.split('/').pop() ?? upload.path;
+        onShowToast?.(upload.skipped > 0
+          ? t('localCode.uploadedSkipped', {
+              count: upload.uploaded,
+              folder,
+              skipped: upload.skipped,
+              limit: MAX_LOCAL_FOLDER_UPLOAD_FILES,
+            })
+          : t('localCode.uploaded', { count: upload.uploaded, folder }));
+        track('success', 1);
+      } finally {
+        setUploading(false);
+      }
+    }
+
     async function handleLinkLocalCodeContext() {
+      if (platformManagedAuth) {
+        await handleUploadLocalCodeContext();
+        return;
+      }
       const selected = await openFolderDialog();
       if (!selected) {
         trackContextLinkResult(analytics.track, {

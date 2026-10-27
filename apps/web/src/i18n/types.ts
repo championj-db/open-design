@@ -5430,6 +5430,9 @@ export interface Dict {
   'dsCreate.githubShowAccessMethods': string;
   'dsCreate.libraryPartiallyAdded': string;
   'dsCreate.localCodeFilesSelected': string;
+  'localCode.uploaded': string;
+  'localCode.uploadedSkipped': string;
+  'localCode.uploadFailed': string;
   'dsCreate.prepareProjectFailed': string;
   'dsCreate.removeFile': string;
   'dsCreate.startingExtraction': string;

@@ -63,6 +63,7 @@ import { Icon } from './Icon';
 import { Skeleton } from './Loading';
 import { Toast } from './Toast';
 import { useOpenFolderImport } from './useOpenFolderImport';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
 
 // Snapshot of a curated prompt template, captured at New Project time and
 // folded into ProjectMetadata.promptTemplate. The user may have edited the
@@ -293,6 +294,7 @@ export function NewProjectPanel({
   initialTab = 'prototype',
 }: Props) {
   const t = useT();
+  const platformManagedAuth = isPlatformManagedAuth(useAuthSession());
   const { locale } = useI18n();
   const analytics = useAnalytics();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -928,6 +930,10 @@ export function NewProjectPanel({
           />
         </div>
 
+        {/* A working directory is a folder on the daemon's machine; on a
+            Databricks App that is the app container, so there is nothing to
+            choose. Folders attach from the composer there instead. */}
+        {platformManagedAuth ? null : (
         <div className="newproj-working-dir-row">
           <button
             type="button"
@@ -960,6 +966,7 @@ export function NewProjectPanel({
             </button>
           ) : null}
         </div>
+        )}
 
         {showDesignSystemPicker ? (
           <DesignSystemPicker
@@ -1156,7 +1163,9 @@ export function NewProjectPanel({
             </button>
           </>
         ) : null}
-        {folderImport.available ? (
+        {/* Opens a folder on the daemon's machine in place; never offered on a
+            Databricks App, whose daemon runs in the app container. */}
+        {folderImport.available && !platformManagedAuth ? (
           <div className="newproj-open-folder">
             <button
               type="button"
