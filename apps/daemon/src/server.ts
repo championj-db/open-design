@@ -1234,6 +1234,7 @@ import {
   type DesignSystemSharing,
 } from './databricks/design-system-sharing.js';
 import { onUserDesignSystemCreated } from './design-systems/created-events.js';
+import { seedTeamDesignSystems } from './databricks/team-design-systems.js';
 import { readBrandDetail } from './brands/index.js';
 import { databricksAgentForRequest } from './databricks/agent-models.js';
 import { DATABRICKS_AGENT_ID } from './runtimes/defs/databricks.js';
@@ -3423,6 +3424,7 @@ export async function startServer({
           isShared: (id) => requireDesignSystemSharing().isShared(id),
           recordCreated: (id, userId) => requireDesignSystemSharing().recordCreated(id, userId),
           setShared: (id, shared) => requireDesignSystemSharing().setShared(id, shared),
+          recordTeamOwned: (id) => requireDesignSystemSharing().recordTeamOwned(id),
         },
         listUserDesignSystemIds: async () =>
           (await listAllDesignSystems()).filter((system) => system.source === 'user').map((system) => system.id),
@@ -3635,6 +3637,19 @@ export async function startServer({
     attributeNewProjects(projectOwnership, onProjectInserted);
     designSystemSharing = createDesignSystemSharing(db);
     attributeNewDesignSystems(designSystemSharing, USER_DESIGN_SYSTEMS_DIR, onUserDesignSystemCreated);
+    // The app's own Team design systems, shared read-only with every user.
+    try {
+      const seeded = await seedTeamDesignSystems({
+        seedRoot: path.join(PROJECT_ROOT, 'team-design-systems'),
+        userDesignSystemsRoot: USER_DESIGN_SYSTEMS_DIR,
+        sharing: designSystemSharing,
+      });
+      if (seeded.installed.length + seeded.updated.length > 0) {
+        console.log(`[design-systems] team design systems installed: ${[...seeded.installed, ...seeded.updated].join(', ')}`);
+      }
+    } catch (error) {
+      console.warn('[design-systems] could not install the team design systems', error);
+    }
   }
   daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);

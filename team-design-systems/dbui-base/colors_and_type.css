@@ -1,0 +1,67 @@
+/* dbui dbui Base theme tokens, from DESIGN.md. Light by default; dark under prefers-color-scheme. */
+:root {
+  --dbui-base-background: #FFFFFF;
+  --dbui-base-surface: #FFFFFF;
+  --dbui-base-surface-muted: #FAFAFA;
+  --dbui-base-foreground: #333333;
+  --dbui-base-muted: #666666;
+  --dbui-base-border: #E5E5E5;
+  --dbui-base-accent: #2272B4;
+  --dbui-base-on-accent: #FFFFFF;
+  --dbui-base-success: #277C43;
+  --dbui-base-danger: #C82D4C;
+  --dbui-base-warning: #BE501E;
+  --dbui-base-font-sans: "Figtree Variable", system-ui, sans-serif;
+  --dbui-base-font-mono: "Commit Mono", ui-monospace, monospace;
+  --dbui-base-radius-sm: 4px;
+  --dbui-base-radius-md: 12px;
+  --dbui-base-radius-lg: 16px;
+  --dbui-base-radius-button: 999px;
+  --dbui-base-font-size-base: 13px;
+  --dbui-base-space-1: 4px;
+  --dbui-base-space-2: 8px;
+  --dbui-base-space-3: 12px;
+  --dbui-base-space-4: 16px;
+  --dbui-base-space-6: 24px;
+  --dbui-base-space-8: 32px;
+
+  --color-background: var(--dbui-base-background);
+  --color-surface: var(--dbui-base-surface);
+  --color-background-soft: var(--dbui-base-surface-muted);
+  --color-text: var(--dbui-base-foreground);
+  --color-text-1: var(--dbui-base-foreground);
+  --color-text-secondary: var(--dbui-base-muted);
+  --color-border: var(--dbui-base-border);
+  --color-primary: var(--dbui-base-accent);
+  --color-primary-soft: color-mix(in srgb, var(--dbui-base-accent) 14%, transparent);
+  --font-family: var(--dbui-base-font-sans);
+  --code-font-family: var(--dbui-base-font-mono);
+  --radius-control: var(--dbui-base-radius-sm);
+  --radius-card: var(--dbui-base-radius-md);
+  --space-2: var(--dbui-base-space-2);
+  --space-3: var(--dbui-base-space-3);
+  --space-4: var(--dbui-base-space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dbui-base-background: #11171C;
+    --dbui-base-surface: #11171C;
+    --dbui-base-surface-muted: #1F272D;
+    --dbui-base-foreground: #E8ECF0;
+    --dbui-base-muted: #92A4B3;
+    --dbui-base-border: rgba(255,255,255,0.10);
+    --dbui-base-accent: #8ACAFF;
+    --dbui-base-on-accent: #11171C;
+    --dbui-base-success: #8DDDA8;
+    --dbui-base-danger: #F792A6;
+    --dbui-base-warning: #F2BE88;
+  }
+}
+
+.od-design-system-preview {
+  color: var(--dbui-base-foreground);
+  background: var(--dbui-base-background);
+  font-family: var(--dbui-base-font-sans);
+  font-size: var(--dbui-base-font-size-base);
+}

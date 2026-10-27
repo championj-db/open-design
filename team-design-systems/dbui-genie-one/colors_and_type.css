@@ -1,0 +1,67 @@
+/* dbui Genie One theme tokens, from DESIGN.md. Light by default; dark under prefers-color-scheme. */
+:root {
+  --dbui-genie-one-background: #FFFFFF;
+  --dbui-genie-one-surface: #FFFFFF;
+  --dbui-genie-one-surface-muted: #EBEBEB;
+  --dbui-genie-one-foreground: #161616;
+  --dbui-genie-one-muted: #6F6F6F;
+  --dbui-genie-one-border: #EBEBEB;
+  --dbui-genie-one-accent: #161616;
+  --dbui-genie-one-on-accent: #FFFFFF;
+  --dbui-genie-one-success: #277C43;
+  --dbui-genie-one-danger: #C82D4C;
+  --dbui-genie-one-warning: #BE501E;
+  --dbui-genie-one-font-sans: "DM Sans", system-ui, sans-serif;
+  --dbui-genie-one-font-mono: "DM Mono", ui-monospace, monospace;
+  --dbui-genie-one-radius-sm: 4px;
+  --dbui-genie-one-radius-md: 8px;
+  --dbui-genie-one-radius-lg: 12px;
+  --dbui-genie-one-radius-button: 9999px;
+  --dbui-genie-one-font-size-base: 15px;
+  --dbui-genie-one-space-1: 4px;
+  --dbui-genie-one-space-2: 8px;
+  --dbui-genie-one-space-3: 12px;
+  --dbui-genie-one-space-4: 16px;
+  --dbui-genie-one-space-6: 24px;
+  --dbui-genie-one-space-8: 32px;
+
+  --color-background: var(--dbui-genie-one-background);
+  --color-surface: var(--dbui-genie-one-surface);
+  --color-background-soft: var(--dbui-genie-one-surface-muted);
+  --color-text: var(--dbui-genie-one-foreground);
+  --color-text-1: var(--dbui-genie-one-foreground);
+  --color-text-secondary: var(--dbui-genie-one-muted);
+  --color-border: var(--dbui-genie-one-border);
+  --color-primary: var(--dbui-genie-one-accent);
+  --color-primary-soft: color-mix(in srgb, var(--dbui-genie-one-accent) 14%, transparent);
+  --font-family: var(--dbui-genie-one-font-sans);
+  --code-font-family: var(--dbui-genie-one-font-mono);
+  --radius-control: var(--dbui-genie-one-radius-sm);
+  --radius-card: var(--dbui-genie-one-radius-md);
+  --space-2: var(--dbui-genie-one-space-2);
+  --space-3: var(--dbui-genie-one-space-3);
+  --space-4: var(--dbui-genie-one-space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dbui-genie-one-background: #11171C;
+    --dbui-genie-one-surface: #11171C;
+    --dbui-genie-one-surface-muted: #37444F;
+    --dbui-genie-one-foreground: #E8ECF0;
+    --dbui-genie-one-muted: #92A4B3;
+    --dbui-genie-one-border: rgba(255,255,255,0.06);
+    --dbui-genie-one-accent: #4299E0;
+    --dbui-genie-one-on-accent: #FFFFFF;
+    --dbui-genie-one-success: #3BA65E;
+    --dbui-genie-one-danger: #E65B77;
+    --dbui-genie-one-warning: #DE7921;
+  }
+}
+
+.od-design-system-preview {
+  color: var(--dbui-genie-one-foreground);
+  background: var(--dbui-genie-one-background);
+  font-family: var(--dbui-genie-one-font-sans);
+  font-size: var(--dbui-genie-one-font-size-base);
+}

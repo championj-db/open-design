@@ -1,0 +1,67 @@
+/* dbui shadcn neutral theme tokens, from DESIGN.md. Light by default; dark under prefers-color-scheme. */
+:root {
+  --dbui-shadcn-neutral-background: #FFFFFF;
+  --dbui-shadcn-neutral-surface: #FFFFFF;
+  --dbui-shadcn-neutral-surface-muted: #F5F5F5;
+  --dbui-shadcn-neutral-foreground: #0A0A0A;
+  --dbui-shadcn-neutral-muted: #737373;
+  --dbui-shadcn-neutral-border: #E5E5E5;
+  --dbui-shadcn-neutral-accent: #171717;
+  --dbui-shadcn-neutral-on-accent: #FAFAFA;
+  --dbui-shadcn-neutral-success: #277C43;
+  --dbui-shadcn-neutral-danger: #C82D4C;
+  --dbui-shadcn-neutral-warning: #BE501E;
+  --dbui-shadcn-neutral-font-sans: "Geist Variable", system-ui, sans-serif;
+  --dbui-shadcn-neutral-font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --dbui-shadcn-neutral-radius-sm: 8px;
+  --dbui-shadcn-neutral-radius-md: 8px;
+  --dbui-shadcn-neutral-radius-lg: 10px;
+  --dbui-shadcn-neutral-radius-button: 8px;
+  --dbui-shadcn-neutral-font-size-base: 14px;
+  --dbui-shadcn-neutral-space-1: 4px;
+  --dbui-shadcn-neutral-space-2: 8px;
+  --dbui-shadcn-neutral-space-3: 12px;
+  --dbui-shadcn-neutral-space-4: 16px;
+  --dbui-shadcn-neutral-space-6: 24px;
+  --dbui-shadcn-neutral-space-8: 32px;
+
+  --color-background: var(--dbui-shadcn-neutral-background);
+  --color-surface: var(--dbui-shadcn-neutral-surface);
+  --color-background-soft: var(--dbui-shadcn-neutral-surface-muted);
+  --color-text: var(--dbui-shadcn-neutral-foreground);
+  --color-text-1: var(--dbui-shadcn-neutral-foreground);
+  --color-text-secondary: var(--dbui-shadcn-neutral-muted);
+  --color-border: var(--dbui-shadcn-neutral-border);
+  --color-primary: var(--dbui-shadcn-neutral-accent);
+  --color-primary-soft: color-mix(in srgb, var(--dbui-shadcn-neutral-accent) 14%, transparent);
+  --font-family: var(--dbui-shadcn-neutral-font-sans);
+  --code-font-family: var(--dbui-shadcn-neutral-font-mono);
+  --radius-control: var(--dbui-shadcn-neutral-radius-sm);
+  --radius-card: var(--dbui-shadcn-neutral-radius-md);
+  --space-2: var(--dbui-shadcn-neutral-space-2);
+  --space-3: var(--dbui-shadcn-neutral-space-3);
+  --space-4: var(--dbui-shadcn-neutral-space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dbui-shadcn-neutral-background: #0A0A0A;
+    --dbui-shadcn-neutral-surface: #0A0A0A;
+    --dbui-shadcn-neutral-surface-muted: #262626;
+    --dbui-shadcn-neutral-foreground: #FAFAFA;
+    --dbui-shadcn-neutral-muted: #A3A3A3;
+    --dbui-shadcn-neutral-border: rgba(255,255,255,0.10);
+    --dbui-shadcn-neutral-accent: #E5E5E5;
+    --dbui-shadcn-neutral-on-accent: #171717;
+    --dbui-shadcn-neutral-success: #8DDDA8;
+    --dbui-shadcn-neutral-danger: #F792A6;
+    --dbui-shadcn-neutral-warning: #F2BE88;
+  }
+}
+
+.od-design-system-preview {
+  color: var(--dbui-shadcn-neutral-foreground);
+  background: var(--dbui-shadcn-neutral-background);
+  font-family: var(--dbui-shadcn-neutral-font-sans);
+  font-size: var(--dbui-shadcn-neutral-font-size-base);
+}
