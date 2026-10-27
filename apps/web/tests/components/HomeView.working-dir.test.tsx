@@ -10,6 +10,7 @@ vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
 import { HomeView } from '../../src/components/HomeView';
 import { isOpenDesignHostAvailable, pickHostWorkingDir } from '@open-design/host';
 import { openFolderDialog } from '../../src/providers/registry';
+import { resetAuthSessionForTests, seedAuthSessionForTests } from '../../src/hooks/useAuthSession';
 
 vi.mock('@open-design/host', async () => {
   const actual = await vi.importActual<typeof import('@open-design/host')>('@open-design/host');
@@ -110,5 +111,34 @@ describe('HomeView working-dir picker host fallback', () => {
       expect(mockedPickHostWorkingDir).toHaveBeenCalledTimes(1);
     });
     expect(mockedOpenFolderDialog).not.toHaveBeenCalled();
+  });
+
+  // On a Databricks App the daemon (and its folder dialog) runs in the app
+  // container: the browser picks the folder instead, and its files upload
+  // into the project once it exists.
+  it('picks the folder in the browser on a Databricks App', async () => {
+    mockedIsHostAvailable.mockReturnValue(false);
+    seedAuthSessionForTests({ provider: 'databricks', user: { id: 'u1', userName: 'ada@example.com' } as never });
+    const file = new File(['a'], 'tokens.css');
+    Object.defineProperty(file, 'webkitRelativePath', { value: 'brand/tokens.css' });
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      expect(this.hasAttribute('webkitdirectory')).toBe(true);
+      Object.defineProperty(this, 'files', { value: [file] });
+      this.dispatchEvent(new Event('change'));
+    });
+    try {
+      renderHome();
+      fireEvent.click(screen.getByTestId('working-dir-trigger'));
+      fireEvent.click(screen.getByTestId('working-dir-pick'));
+
+      expect(click).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByTestId('working-dir-trigger').textContent).toContain('brand'));
+      expect(mockedOpenFolderDialog).not.toHaveBeenCalled();
+      expect(mockedPickHostWorkingDir).not.toHaveBeenCalled();
+    } finally {
+      click.mockRestore();
+      resetAuthSessionForTests();
+      seedAuthSessionForTests({ provider: 'local', user: null });
+    }
   });
 });

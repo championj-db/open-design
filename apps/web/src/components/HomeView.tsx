@@ -151,6 +151,8 @@ import type { OnboardingEntry } from '../onboarding/onboarding-entry';
 import { AnimatePresence } from 'motion/react';
 import { DeepSeekV4FlashCampaign } from './DeepSeekV4FlashCampaign';
 import type { DeepSeekV4FlashCampaignAudience } from '../campaigns/deepseek-v4-flash';
+import { isPlatformManagedAuth, useAuthSession } from '../hooks/useAuthSession';
+import { pickLocalFolderFiles, stagePendingLocalFolder } from '../runtime/local-code';
 
 export interface ActivePlugin {
   record: InstalledPluginRecord;
@@ -2144,6 +2146,8 @@ export function HomeView({
     setStagedFiles((current) => current.filter((_, i) => i !== index));
   }
 
+  const platformManagedAuth = isPlatformManagedAuth(useAuthSession());
+
   function addWorkspaceContext(item: WorkspaceContextItem) {
     setContextWorkspaceItems((current) =>
       current.some((candidate) => candidate.id === item.id)
@@ -2158,6 +2162,15 @@ export function HomeView({
   }
 
   async function handlePickWorkingDir() {
+    // On a Databricks App the daemon cannot reach the user's disk, so a
+    // working directory cannot be linked by path: the browser reads the folder
+    // and its files upload into the project once it exists
+    // (runtime/local-code.ts), as Link local code does.
+    if (platformManagedAuth) {
+      const files = await pickLocalFolderFiles();
+      if (files) addWorkspaceContext(stagePendingLocalFolder(files));
+      return null;
+    }
     // On desktop the working-dir POST is gated behind a host-minted token, so
     // pick through the host bridge to capture { baseDir, token } together.
     if (isOpenDesignHostAvailable()) {
