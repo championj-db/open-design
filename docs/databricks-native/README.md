@@ -156,7 +156,8 @@ Generation runs on the workspace's own models, as the signed-in user:
   env in this mode.
 - **Models.** `/api/agents` lists the ready `llm/v1/chat` endpoints the caller
   can see as the agent's models. "Default" resolves to
-  `OD_DATABRICKS_DEFAULT_MODEL`, else `databricks-claude-sonnet-4-5`.
+  `OD_DATABRICKS_DEFAULT_MODEL` (`app.yaml` sets `databricks-claude-opus-5-5`),
+  else `databricks-claude-sonnet-4-5`.
 - **Tools.** Write, Edit, Read, Glob, Grep and TodoWrite, confined to the run's
   project directory. There is deliberately no shell, because all signed-in
   users share one app container.
